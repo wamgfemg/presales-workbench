@@ -1,0 +1,91 @@
+name: Deploy to Tencent Cloud
+
+# 关键：本项目【零构建】——不执行 npm install / build。
+# 前端是纯静态文件，BFF 是零依赖 Node 脚本，服务器上用 node:22-alpine 容器直接运行。
+# 因此流水线只做「同步文件 + 重启服务 + 健康检查」，服务器全程不参与编译，不存在 OOM 风险。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'server/**'
+      - 'deploy/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Sync & Restart
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sanity check (语法自检，不安装任何依赖)
+        run: |
+          node --version
+          node --check server/index.js
+          node --check server/hermes.js
+          node --check frontend/src/main.js
+          node --check frontend/src/hermes-chat.js
+          test -f frontend/index.html
+          echo "语法检查通过"
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Rsync application files
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER_NAME: ${{ secrets.SERVER_USER }}
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            frontend server deploy \
+            "$USER_NAME@$HOST:/opt/presales-workbench/"
+
+      - name: Restart service and health check
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER_NAME: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$USER_NAME@$HOST" bash -s <<'REMOTE'
+          set -e
+          cp /opt/presales-workbench/deploy/presales-workbench.service /etc/systemd/system/presales-workbench.service
+          systemctl daemon-reload
+          systemctl restart presales-workbench
+          ok=0
+          for i in $(seq 1 25); do
+            if curl -fsS http://127.0.0.1:8088/api/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          echo "----- health -----"
+          curl -sS http://127.0.0.1:8088/api/health || true
+          echo
+          if [ "$ok" != "1" ]; then
+            echo "!! 健康检查失败，最近日志："
+            journalctl -u presales-workbench -n 40 --no-pager || true
+            exit 1
+          fi
+          echo "----- 资源占用 -----"
+          docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' presales-workbench || true
+          free -h | head -2
+          REMOTE
+
+      - name: Summary
+        if: always()
+        run: echo "访问地址 http://${{ secrets.SERVER_HOST }}:8088" >> $GITHUB_STEP_SUMMARY

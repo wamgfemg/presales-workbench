@@ -1,0 +1,435 @@
+/* =========================================================================
+ * 方案制作中心 · 接入 Hermes Agent（profile: wordpresales）
+ * -------------------------------------------------------------------------
+ * 本文件在 main.js 之后加载，覆盖原「本地模拟专家」的对话逻辑，
+ * 改为通过同源 BFF（/api/chat, SSE 流式）与真实 Hermes 智能体对话。
+ * 其余模块（项目管理 / 知识库 / C139 / 工具箱）逻辑完全不变。
+ * ========================================================================= */
+(function () {
+  'use strict'
+
+  var API = (window.HX_API_BASE || '').replace(/\/$/, '')
+
+  /* 运行态放在内存里，绝不写进 localStorage（否则刷新后会残留"回复中"把输入框锁死） */
+  var HX_BUSY = {}, HX_CTRL = {}
+  function hxBusy(id) { return !!HX_BUSY[id] }
+  window.hxBusy = hxBusy
+
+  /* 清理上一次会话可能残留的流式状态 */
+  function hxSanitize() {
+    ;(store.tasks || []).forEach(function (t) {
+      if (t.hxBusy) delete t.hxBusy
+      if (t._ctrl) delete t._ctrl
+      if (t.msgs && t.msgs.length) {
+        t.msgs.forEach(function (m) {
+          if (m.streaming) { delete m.streaming; if (!m.text) m.text = '（上次回复未完成，已中断）' }
+        })
+      }
+    })
+    persist()
+  }
+  hxSanitize()
+
+  /* ---------------- 样式（注入，不改 styles.css） ---------------- */
+  var css = ''
+    + '.hx-badge{display:inline-block;margin-left:10px;padding:2px 9px;border-radius:20px;font-size:11.5px;font-weight:700;vertical-align:middle;background:#eef1f6;color:#6b7280}'
+    + '.hx-badge.ok{background:rgba(34,160,90,.12);color:#1a8a4e}'
+    + '.hx-badge.bad{background:rgba(239,83,80,.12);color:#d33}'
+    + '.hx-status{margin-top:6px;font-size:12px;color:var(--sub);font-style:italic}'
+    + '.hx-caret{display:inline-block;width:7px;background:currentColor;opacity:.55;animation:hxb 1s steps(1) infinite;margin-left:1px}'
+    + '@keyframes hxb{50%{opacity:0}}'
+    + '.hx-live{white-space:pre-wrap;word-break:break-word}'
+    + '.hx-err{color:#d33;font-size:12.5px;margin-top:6px}'
+    + '.chip.hx-stop{background:rgba(239,83,80,.1);border-color:rgba(239,83,80,.35);color:#d33}'
+    + '.chip.hx-gen{background:rgba(34,160,90,.1);border-color:rgba(34,160,90,.35);color:#1a8a4e;font-weight:700}'
+  var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st)
+
+  /* ---------------- 健康检查徽标 ---------------- */
+  function hxBadge(cls, txt, title) {
+    var el = document.getElementById('hxBadge')
+    if (!el) return
+    el.className = 'hx-badge ' + (cls || '')
+    el.textContent = txt
+    if (title) el.title = title
+  }
+  function hxHealth() {
+    fetch(API + '/api/health').then(function (r) { return r.json() }).then(function (d) {
+      var ok = d && (d.hermesReachable === 200 || typeof d.hermesReachable === 'number')
+      hxBadge(ok ? 'ok' : 'bad',
+        ok ? '● Hermes 已连接 · ' + (d.profile || '') : '● Hermes 不可达',
+        'BFF 内存 ' + (d.memoryMB || '?') + 'MB · 会话 ' + ((d.pool || {}).sessions || 0) + '/' + ((d.pool || {}).max || 0) + ' · ' + (d.hermesUrl || ''))
+    }).catch(function () { hxBadge('bad', '● 后端未连接', '无法访问 /api/health，前端可能以静态方式打开') })
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hxHealth)
+  else hxHealth()
+  setInterval(hxHealth, 60000)
+
+  /* ---------------- Markdown → HTML（用于初稿进编辑器） ---------------- */
+  function inl(s) {
+    s = esc(s)
+    s = s.replace(/`([^`]+)`/g, '<code style="background:#f2f4f8;padding:1px 4px;border-radius:4px">$1</code>')
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>')
+    return s
+  }
+  function hxMd2Html(md) {
+    var lines = String(md || '').replace(/\r/g, '').split('\n')
+    var out = [], i = 0, inCode = false, code = []
+    function flushList(tag, items) { out.push('<' + tag + '>' + items.map(function (x) { return '<li>' + inl(x) + '</li>' }).join('') + '</' + tag + '>') }
+    while (i < lines.length) {
+      var L = lines[i]
+      if (/^\s*```/.test(L)) {
+        if (inCode) { out.push('<pre style="background:#f6f8fa;padding:10px 12px;border-radius:8px;overflow:auto">' + esc(code.join('\n')) + '</pre>'); code = []; inCode = false }
+        else inCode = true
+        i++; continue
+      }
+      if (inCode) { code.push(L); i++; continue }
+      if (/^\s*$/.test(L)) { i++; continue }
+      var h = /^(#{1,6})\s+(.*)$/.exec(L)
+      if (h) { var n = Math.min(h[1].length + 1, 6); out.push('<h' + n + '>' + inl(h[2]) + '</h' + n + '>'); i++; continue }
+      if (/^\s*([-*_])\s*\1\s*\1[\s-*_]*$/.test(L)) { out.push('<hr>'); i++; continue }
+      if (/^\s*\|.*\|\s*$/.test(L)) {
+        var rows = []
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(lines[i]); i++ }
+        var cells = rows.map(function (r) { return r.trim().replace(/^\||\|$/g, '').split('|').map(function (c) { return c.trim() }) })
+        var body = cells.filter(function (r) { return !r.every(function (c) { return /^:?-{2,}:?$/.test(c) }) })
+        var html = '<table style="width:100%;border-collapse:collapse;margin:8px 0">'
+        body.forEach(function (r, ri) {
+          html += '<tr>' + r.map(function (c) {
+            return ri === 0
+              ? '<th style="border:1px solid #dfe3ea;padding:6px 8px;background:#f5f7fa;text-align:left">' + inl(c) + '</th>'
+              : '<td style="border:1px solid #dfe3ea;padding:6px 8px">' + inl(c) + '</td>'
+          }).join('') + '</tr>'
+        })
+        out.push(html + '</table>'); continue
+      }
+      if (/^\s*>\s?/.test(L)) {
+        var q = []
+        while (i < lines.length && /^\s*>\s?/.test(lines[i])) { q.push(lines[i].replace(/^\s*>\s?/, '')); i++ }
+        out.push('<blockquote style="border-left:3px solid var(--brand);padding-left:12px;color:var(--sub);margin:8px 0">' + inl(q.join(' ')) + '</blockquote>')
+        continue
+      }
+      if (/^\s*[-*+]\s+/.test(L)) {
+        var ul = []
+        while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { ul.push(lines[i].replace(/^\s*[-*+]\s+/, '')); i++ }
+        flushList('ul', ul); continue
+      }
+      if (/^\s*\d+[.)]\s+/.test(L)) {
+        var ol = []
+        while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) { ol.push(lines[i].replace(/^\s*\d+[.)]\s+/, '')); i++ }
+        flushList('ol', ol); continue
+      }
+      var para = []
+      while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^(#{1,6}\s|\s*[-*+]\s|\s*\d+[.)]\s|\s*\||\s*>|\s*```)/.test(lines[i])) { para.push(lines[i]); i++ }
+      out.push('<p>' + inl(para.join('\n')) + '</p>')
+    }
+    if (inCode && code.length) out.push('<pre>' + esc(code.join('\n')) + '</pre>')
+    return out.join('\n')
+  }
+  window.hxMd2Html = hxMd2Html
+
+  /* ---------------- 提示词构造 ---------------- */
+  var OUT_REQ = {
+    bidword: '- 七章结构：项目理解与需求分析 / 总体设计 / 详细技术方案 / 实施方案 / 售后服务 / 公司实力与案例 / 附件索引\n'
+      + '- 条目/段落式表述，不使用表格；所有★号条款逐条正偏离响应\n'
+      + '- 数字与口径前后必须一致；无法确定处标注【待确认】\n'
+      + '- 篇幅充分，正文不少于 3000 字',
+    first: '- 逐页输出：页码、标题、3-5 条要点、讲稿提示\n- 封面含项目名与客户名；控制在 10-14 页\n- 用客户的业务语言讲价值，不堆技术名词',
+    tech: '- 逐页输出：页码、标题、3-5 条要点、讲稿提示\n- 覆盖需求理解 / 总体架构 / 关键技术设计 / 部署与安全 / 实施计划\n- 控制在 10-14 页',
+    bidppt: '- 逐页输出：页码、标题、3-5 条要点、讲稿提示\n- 控制在 8-10 页，末尾附「评委问答口径卡」\n- 亮点必须对应评分办法',
+    other: '- 直接产出期望交付物（纪要 / 对比表 / 清单 / 文档草稿）\n- 明确责任人与时间；无法确定处标注【待确认】',
+  }
+
+  function hxProjectBlock(p) {
+    var s = (typeof c139Stats === 'function' && p.c139) ? c139Stats(p.c139) : { rate: '—', zone: '' }
+    var q = '【项目概况】\n'
+      + '项目名称：' + (p.name || '—') + '\n'
+      + '客户：' + (p.customer || '—') + '\n'
+      + '预算：' + (p.budget || '—') + ' 万元 ｜ 阶段：' + (p.stage || '—')
+      + ' ｜ C139 赢单率：' + s.rate + '%'
+      + (s.zone ? '（' + (s.zone === 'win' ? '赢单区' : s.zone === 'mid' ? '抖动区' : '输单区') + '）' : '') + '\n'
+      + (p.source ? '项目来源：' + p.source + '\n' : '')
+    q += '\n【项目背景收集表】\n'
+    var any = false
+    if (typeof BG_FIELDS !== 'undefined' && p.bg) {
+      BG_FIELDS.forEach(function (f) { if (p.bg[f[0]]) { q += '- ' + f[1] + '：' + p.bg[f[0]] + '\n'; any = true } })
+    }
+    if (!any) q += '- （背景收集表为空，请在对话中向我追问缺失信息）\n'
+    var kws = String((p.customer || '') + (p.name || '')).slice(0, 4)
+    var kb = (store.kb || []).filter(function (k) {
+      return kws && (String(k.title).indexOf(kws) >= 0 || String(k.content).indexOf(kws) >= 0)
+    }).slice(0, 3)
+    if (kb.length) {
+      q += '\n【可引用的知识库素材】\n'
+      kb.forEach(function (k) { q += '- 《' + k.title + '》：' + String(k.content).slice(0, 200) + '…\n' })
+    }
+    return q
+  }
+
+  function hxKickoff(t) {
+    var p = getProj(t.projectId) || {}
+    var D = DOC_TYPES[t.type]
+    var q = '【角色】你是资深售前解决方案专家，本次担任「' + D.expert + '」。'
+      + '所有回答用简体中文，专业、结构化、可直接用于交付。\n\n'
+    q += hxProjectBlock(p)
+    q += '\n【本次任务】' + (t.type === 'other'
+      ? '协助我处理该项目的一项事务型任务。'
+      : '为该项目编制《' + D.name + '》。')
+    q += '\n\n【本轮要求】\n'
+      + '1. 先用一句话确认你已理解任务与项目背景；\n'
+      + '2. 然后列出你还需要我补充的关键要素（最多 5 项，用编号，每项一句话说明为什么需要）；\n'
+      + '3. 本轮不要输出方案正文，等我回答后再生成；\n'
+      + '4. 不要调用文件搜索等工具，直接基于以上信息回答。\n\n'
+      + '【说明】我随时可能要求你「输出完整初稿」，届时请基于当时已知信息直接产出完整正文，缺失处标注【待确认】。'
+    return q
+  }
+
+  function hxDraftPrompt(t) {
+    var D = DOC_TYPES[t.type]
+    var p = getProj(t.projectId) || {}
+    var q = '【任务】现在请输出《' + D.name + '》的完整正文初稿（项目：' + (p.name || '—') + '，客户：' + (p.customer || '—') + '）。\n\n'
+    q += '【输出要求】\n' + (OUT_REQ[t.type] || OUT_REQ.other) + '\n\n'
+    q += '【格式】\n- 直接输出 Markdown 正文，用 ## / ### 分层标题\n'
+      + '- 不要任何开场白、寒暄、说明或结尾总结语，第一行就是文档标题\n'
+      + '- 不要用代码块包裹整篇内容\n'
+      + '- 不要调用任何工具，直接生成\n'
+    return q
+  }
+
+  /* ---------------- SSE 流式对话核心 ---------------- */
+  function hxScroll() {
+    var b = document.querySelector('#docRight .chat-body')
+    if (b) b.scrollTop = b.scrollHeight
+  }
+  function hxSetStatus(s) {
+    var el = document.getElementById('hxStatus')
+    if (el) el.textContent = s || ''
+  }
+
+  function hxSend(t, text, opts) {
+    opts = opts || {}
+    if (!t) return Promise.resolve()
+    if (hxBusy(t.id)) { toast('专家正在回复中，请稍候'); return Promise.resolve() }
+    HX_BUSY[t.id] = true
+
+    if (!opts.hidden) say(t, 'me', text)
+    if (!opts.hidden && !t.autoTitle) {
+      t.title = String(text).replace(/\s+/g, ' ').slice(0, 24); t.autoTitle = true
+    }
+    var aiMsg = { role: 'ai', text: '', ts: Date.now(), streaming: true }
+    t.msgs.push(aiMsg)
+    persist()
+    renderRightPanel(); renderTaskList(); renderTypeCards(); hxScroll()
+    hxSetStatus(opts.statusText || '正在连接专家智能体…')
+
+    var ctrl = new AbortController()
+    HX_CTRL[t.id] = ctrl
+    var acc = ''
+
+    function paint() {
+      var live = document.getElementById('hxLive')
+      if (live) { live.textContent = acc; hxScroll() }
+    }
+
+    function finish(finalText, errMsg) {
+      aiMsg.text = finalText || acc || ''
+      delete aiMsg.streaming
+      delete HX_CTRL[t.id]
+      delete HX_BUSY[t.id]
+      if (errMsg) aiMsg.error = errMsg
+      persist()
+      renderRightPanel(); renderTaskList(); hxScroll()
+      if (opts.onDone) { try { opts.onDone(aiMsg.text) } catch (e) { console.error(e) } }
+    }
+
+    return fetch(API + '/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: t.id, text: text, reset: !!opts.reset }),
+      signal: ctrl.signal,
+    }).then(function (r) {
+      if (!r.ok || !r.body) throw new Error('后端返回 HTTP ' + r.status)
+      var reader = r.body.getReader()
+      var dec = new TextDecoder('utf-8')
+      var buf = ''
+      var finalText = null, errText = null
+
+      function pump() {
+        return reader.read().then(function (res) {
+          if (res.done) { finish(finalText, errText); return }
+          buf += dec.decode(res.value, { stream: true })
+          var parts = buf.split('\n\n')
+          buf = parts.pop() || ''
+          parts.forEach(function (block) {
+            block.split('\n').forEach(function (line) {
+              if (line.indexOf('data:') !== 0) return
+              var payload = line.slice(5).trim()
+              if (!payload) return
+              var ev
+              try { ev = JSON.parse(payload) } catch (e) { return }
+              if (ev.type === 'delta') { acc += ev.text || ''; aiMsg.text = acc; hxSetStatus(''); paint() }
+              else if (ev.type === 'status') hxSetStatus(ev.text || '')
+              else if (ev.type === 'session') hxSetStatus('已连接（模型 ' + (ev.model || '—') + '），专家正在阅读项目资料…')
+              else if (ev.type === 'done') { finalText = ev.text || acc; hxSetStatus('') }
+              else if (ev.type === 'error') { errText = ev.message || '未知错误'; hxSetStatus('') }
+            })
+          })
+          return pump()
+        })
+      }
+      return pump()
+    }).catch(function (e) {
+      if (e && e.name === 'AbortError') { finish(acc + '\n\n（已手动中断）'); return }
+      var m = String(e && e.message || e)
+      finish(acc || '', m)
+      toast('对话失败：' + m)
+    })
+  }
+  window.hxSend = hxSend
+
+  function hxStop(id) {
+    if (HX_CTRL[id]) { HX_CTRL[id].abort(); toast('已中断本次回复') }
+  }
+  window.hxStop = hxStop
+
+  function hxReset(id) {
+    var t = getTask(id)
+    if (!t || hxBusy(t.id)) return
+    if (!confirm('重开会话会清空本任务与智能体的对话上下文（已生成的初稿保留），确定？')) return
+    fetch(API + '/api/reset', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: t.id }),
+    }).catch(function () {})
+    t.msgs = []
+    t.status = t.draft ? 'draft' : 'chat'
+    persist()
+    var D = DOC_TYPES[t.type]
+    say(t, 'ai', '（会话已重置）我是「' + D.expert + '」' + D.emo + '，正在重新载入项目背景…')
+    hxSend(t, hxKickoff(t), { hidden: true, statusText: '正在重新载入项目背景…' })
+  }
+  window.hxReset = hxReset
+
+  /* ---------------- 覆盖：创建任务 ---------------- */
+  window.createDocTask = function (type) {
+    var pid = document.getElementById('docProj').value
+    if (!pid) { toast('请先在①关联项目'); return }
+    store.tasks = store.tasks || []
+    var p = getProj(pid)
+    var D = DOC_TYPES[type]
+    var t = {
+      id: uid(), projectId: pid, type: type, title: D.name + ' · 新对话',
+      status: 'chat', msgs: [], answers: {}, qIndex: 0,
+      created: today(), ts: Date.now(), draft: null, hx: true,
+    }
+    store.tasks.unshift(t)
+    if (typeof addTl === 'function') addTl(p, '创建任务：' + t.title)
+    persist()
+    curTaskId = t.id; curType = type; docMode = 'chat'; docView = 'task'
+
+    var filled = (typeof BG_FIELDS !== 'undefined' && p.bg)
+      ? BG_FIELDS.filter(function (f) { return !!p.bg[f[0]] }).length : 0
+    say(t, 'ai', '您好！我是「' + D.expert + '」' + D.emo + '，由 Hermes 智能体（' + (D.name) + '）为您服务。\n'
+      + '项目：' + p.name + '\n客户：' + p.customer + ' · 阶段：' + p.stage
+      + (typeof c139Stats === 'function' ? ' · C139 赢单率 ' + c139Stats(p.c139).rate + '%' : '') + '\n'
+      + '已自动注入项目背景收集表（' + filled + '/' + ((typeof BG_FIELDS !== 'undefined' && BG_FIELDS.length) || 9) + ' 项已填）与匹配的知识库素材。')
+    renderTaskList(); renderTypeCards()
+    hxSend(t, hxKickoff(t), { hidden: true, statusText: '正在载入项目背景并规划提问…' })
+    toast('任务已创建，专家正在接入')
+  }
+
+  /* ---------------- 覆盖：发送消息 ---------------- */
+  window.sendChat = function (id) {
+    var inp = document.getElementById('chatIn')
+    var t = getTask(id)
+    if (!inp || !t) return
+    var v = inp.value
+    if (!String(v).trim()) return
+    inp.value = ''
+    hxSend(t, String(v).trim())
+  }
+
+  /* ---------------- 覆盖：生成初稿 ---------------- */
+  window.genDraft = function (t) {
+    if (typeof t === 'string') t = getTask(t)
+    if (!t) return
+    if (hxBusy(t.id)) { toast('专家正在回复中，请稍候'); return }
+    hxSend(t, hxDraftPrompt(t), {
+      hidden: true,
+      statusText: '专家正在撰写完整初稿，通常需要 1-3 分钟…',
+      onDone: function (txt) {
+        var body = String(txt || '').trim()
+        if (!body) { toast('初稿生成失败，请重试或先补充信息'); return }
+        t.draft = hxMd2Html(body)
+        t.draftMd = body
+        t.status = 'draft'
+        docMode = 'edit'
+        persist()
+        renderTaskList(); renderRightPanel()
+        toast('初稿已生成，可直接编辑与导出')
+      },
+    })
+  }
+
+  /* ---------------- 覆盖：对话区渲染（支持流式） ---------------- */
+  window.chatBodyHtml = function (t) {
+    var D = DOC_TYPES[t.type]
+    var h = '<div class="chat-body">'
+    t.msgs.forEach(function (m) {
+      if (m.streaming) {
+        h += '<div class="msg ai"><div class="m-av">' + D.emo + '</div><div class="bubble">'
+          + '<span class="hx-live" id="hxLive"></span><span class="hx-caret">&nbsp;</span>'
+          + '<div class="hx-status" id="hxStatus"></div></div></div>'
+      } else {
+        h += '<div class="msg ' + m.role + '"><div class="m-av">' + (m.role === 'ai' ? D.emo : '🧑') + '</div>'
+          + '<div class="bubble">' + esc(m.text)
+          + (m.error ? '<div class="hx-err">⚠ ' + esc(m.error) + '</div>' : '')
+          + '</div></div>'
+      }
+    })
+    h += '</div>'
+    h += '<div class="chips">'
+    if (hxBusy(t.id)) {
+      h += '<span class="chip hx-stop" onclick="hxStop(\'' + t.id + '\')">⏹ 停止生成</span>'
+    } else {
+      h += '<span class="chip hx-gen" onclick="genDraft(getTask(\'' + t.id + '\'))">⚡ '
+        + (t.draft ? '按最新对话重新生成初稿' : '生成完整初稿') + '</span>'
+      h += '<span class="chip" onclick="pickKbForAnswer(\'' + t.id + '\')">📚 @知识库素材</span>'
+      h += '<span class="chip" onclick="hxSend(getTask(\'' + t.id + '\'),\'请基于当前信息，补充说明我方相对竞争对手的差异化优势，条目式，不超过 8 条。\')">💡 追问差异化优势</span>'
+      h += '<span class="chip" onclick="hxReset(\'' + t.id + '\')">🔄 重开会话</span>'
+    }
+    h += '</div>'
+    return h
+  }
+
+  /* ---------------- 覆盖：输入栏 ---------------- */
+  window.qwInputBar = function (t) {
+    var active = !!t && docMode === 'chat' && !hxBusy(t.id)
+    var ph = t
+      ? (hxBusy(t.id) ? '专家正在回复中…' : '回复「' + DOC_TYPES[t.type].expert + '」，或直接提出你的要求（回车发送）')
+      : '今天帮你做些什么？请先在左侧选择文档类型并发起新对话'
+    return '<div class="qw-input">'
+      + '<input id="chatIn" ' + (active ? '' : 'disabled') + ' placeholder="' + esc(ph) + '" '
+      + (active ? 'onkeydown="if(event.key===\'Enter\')sendChat(\'' + t.id + '\')"' : '') + '>'
+      + '<div class="qi-bar">'
+      + '<span class="qi-ico" title="引用知识库素材" onclick="' + (active ? 'pickKbForAnswer(\'' + t.id + '\')' : 'toast(\'请先创建/打开任务\')') + '">＋</span>'
+      + '<div style="flex:1"></div>'
+      + '<span class="qi-auto" title="由 Hermes Agent(wordpresales) 真实生成">🤖 Hermes · wordpresales</span>'
+      + '<button class="qi-send" title="发送" onclick="' + (active ? 'sendChat(\'' + t.id + '\')' : (t && hxBusy(t.id) ? 'hxStop(\'' + t.id + '\')' : 'toast(\'请先创建/打开任务\')')) + '">➤</button>'
+      + '</div></div>'
+  }
+
+  /* ---------------- 渲染后回填流式文本（避免重绘丢内容） ---------------- */
+  var _rrp = window.renderRightPanel
+  window.renderRightPanel = function () {
+    _rrp.apply(this, arguments)
+    var t = curTaskId ? getTask(curTaskId) : null
+    if (!t) return
+    var live = document.getElementById('hxLive')
+    if (live) {
+      var last = t.msgs[t.msgs.length - 1]
+      if (last && last.streaming) live.textContent = last.text || live.textContent || ''
+    }
+  }
+
+  console.log('[hermes-chat] 已接管方案制作中心对话（BFF: ' + (API || '同源') + '/api/chat）')
+})()

@@ -1,0 +1,27 @@
+[Unit]
+Description=Presales Workbench (static frontend + Hermes BFF, zero-dependency Node in Docker)
+Documentation=https://github.com/wamgfemg/presales-workbench
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+# 每次启动前清掉可能残留的同名容器
+ExecStartPre=-/usr/bin/docker rm -f presales-workbench
+# --network host：容器直接用主机网络，BFF 以 127.0.0.1:9119 访问 Hermes，无需 docker-proxy
+# --memory 320m：硬性内存上限，保证不会挤掉 Hermes / WeKnora
+ExecStart=/usr/bin/docker run --rm --name presales-workbench \
+  --network host \
+  --memory 320m --memory-swap 320m \
+  --cpus 1.0 \
+  --env-file /opt/presales-workbench/.env \
+  -v /opt/presales-workbench/frontend:/app/frontend:ro \
+  -v /opt/presales-workbench/server:/app/server:ro \
+  -w /app \
+  node:22-alpine node /app/server/index.js
+ExecStop=/usr/bin/docker stop -t 5 presales-workbench
+
+[Install]
+WantedBy=multi-user.target
