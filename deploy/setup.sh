@@ -18,7 +18,7 @@ HERMES_PROFILE="${HERMES_PROFILE:-wordpresales}"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "==> 应用目录 $APP_DIR"
-mkdir -p "$APP_DIR"
+mkdir -p "$APP_DIR/data"
 
 echo "==> 同步应用文件"
 cp -r "$SRC_DIR/frontend" "$APP_DIR/"

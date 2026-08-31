@@ -6,11 +6,15 @@
  *   1. POST /auth/password-login {username,password,provider:"basic"}  -> Set-Cookie
  *   2. POST /api/auth/ws-ticket  (带 cookie)                           -> {ticket}  TTL 30s
  *   3. ws://host:9119/api/ws?ticket=xxx                                 换行分隔 JSON-RPC
- *   4. session.create {profile,cols,source}                             -> result.session_id
+ *   4. session.create {profile,cols,source}                             -> result.{session_id, stored_session_id}
  *   5. prompt.submit  {session_id,text,profile}                         -> 流式事件
  *   事件：message.start / thinking.delta / reasoning.delta / reasoning.available
  *        / message.delta(payload.text) / session.usage / message.complete(payload.text,status,usage)
  *   工具调用类事件（tool.*）按状态提示透传。
+ *
+ * 关键约定：
+ *   - session_id: 短码，用于 prompt.submit。
+ *   - stored_session_id: 长码，对应 /api/sessions 列表中的 id，用于前端对齐 Hermes 历史对话。
  */
 
 const DEFAULTS = {
@@ -31,7 +35,8 @@ class HermesSession {
   constructor(opts = {}) {
     this.cfg = { ...DEFAULTS, ...opts }
     this.ws = null
-    this.sessionId = null
+    this.sessionId = null        // 短码，用于 submit
+    this.storedSessionId = null   // 长码，与 /api/sessions 对齐
     this.model = null
     this.buf = ''
     this.nextId = 1
@@ -72,13 +77,13 @@ class HermesSession {
   }
 
   /* ---------------- 建立会话 ---------------- */
-  open() {
+  open(preferredSessionId) {
     if (this.opening) return this.opening
-    this.opening = this._open().finally(() => { this.opening = null })
+    this.opening = this._open(preferredSessionId).finally(() => { this.opening = null })
     return this.opening
   }
 
-  async _open() {
+  async _open(preferredSessionId) {
     this.close(true)
     const cookie = await this._cookie()
     const ticket = await this._ticket(cookie) // TTL 30s，拿到后立刻连
@@ -125,14 +130,23 @@ class HermesSession {
       }
     })
 
+    // 如果调用方指定了短码 sessionId，则直接复用该会话（Hermes 支持跨 WS 复用）
+    if (preferredSessionId) {
+      this.sessionId = preferredSessionId
+      this.lastUsed = Date.now()
+      // 不单独验证，交给后续 submit 失败重试机制兜底
+      return { sessionId: this.sessionId, storedSessionId: this.storedSessionId }
+    }
+
     const res = await this._rpc('session.create', {
       profile: this.cfg.profile, cols: 120, source: 'presales-workbench',
     }, 60000)
     this.sessionId = res && res.session_id
+    this.storedSessionId = (res && res.stored_session_id) || null
     this.model = (res && res.info && res.info.model) || null
     if (!this.sessionId) throw new Error('session.create 未返回 session_id')
     this.lastUsed = Date.now()
-    return this.sessionId
+    return { sessionId: this.sessionId, storedSessionId: this.storedSessionId }
   }
 
   close(silent) {
@@ -298,30 +312,99 @@ class HermesSession {
     })
 
     this.lastUsed = Date.now()
-    return result
+    return {
+      ...result,
+      sessionId: this.sessionId,
+      storedSessionId: this.storedSessionId,
+    }
   }
 }
 
-/* ---------------- 会话池：按 key（前端任务 id）复用，控制内存 ---------------- */
+/* ---------------- 会话池：按 key（前端任务 id）复用，控制内存，持久化映射 ---------------- */
 class HermesPool {
   constructor(opts = {}) {
     this.opts = opts
     this.max = Number(process.env.HERMES_MAX_SESSIONS || 8)
     this.ttlMs = Number(process.env.HERMES_SESSION_TTL_MS || 45 * 60 * 1000)
     this.map = new Map()
+    this.sessionMap = new Map() // shortId -> { key, longId, createdAt, lastUsed }
+    this.dataDir = process.env.DATA_DIR || '/opt/presales-workbench/data'
+    this._load()
     this.sweeper = setInterval(() => this.sweep(), 60000)
     if (this.sweeper.unref) this.sweeper.unref()
   }
 
-  get(key) {
+  _mapPath() { return require('node:path').join(this.dataDir, 'session-map.json') }
+
+  _load() {
+    try {
+      const fs = require('node:fs')
+      const p = this._mapPath()
+      if (!fs.existsSync(p)) return
+      const raw = fs.readFileSync(p, 'utf8')
+      const arr = JSON.parse(raw)
+      if (Array.isArray(arr)) {
+        for (const it of arr) {
+          if (it && it.shortId) this.sessionMap.set(it.shortId, it)
+        }
+      }
+    } catch (e) {
+      console.error('加载 session-map 失败:', e && e.message)
+    }
+  }
+
+  _save() {
+    try {
+      const fs = require('node:fs')
+      const p = this._mapPath()
+      fs.mkdirSync(require('node:path').dirname(p), { recursive: true })
+      fs.writeFileSync(p, JSON.stringify([...this.sessionMap.values()], null, 2), 'utf8')
+    } catch (e) {
+      console.error('保存 session-map 失败:', e && e.message)
+    }
+  }
+
+  get(key, preferredSessionId) {
     let s = this.map.get(key)
-    if (!s) {
+    const needCreate = !s || (preferredSessionId && s.sessionId !== preferredSessionId)
+    if (needCreate) {
+      // 如果 key 已经绑定别的 session，先 drop 掉
+      if (s) this.drop(key)
       this.evictIfNeeded()
       s = new HermesSession(this.opts)
+      if (preferredSessionId) s.sessionId = preferredSessionId
       this.map.set(key, s)
     }
     s.lastUsed = Date.now()
     return s
+  }
+
+  // 主动把 key 绑定到指定的 sessionId（短码）
+  attach(key, shortId, longId) {
+    this.sessionMap.set(shortId, {
+      shortId, longId: longId || null, key,
+      createdAt: Date.now(), lastUsed: Date.now(),
+    })
+    this._save()
+  }
+
+  // 根据 longId 找 shortId
+  findByLongId(longId) {
+    if (!longId) return null
+    for (const it of this.sessionMap.values()) {
+      if (it.longId === longId) return it
+    }
+    return null
+  }
+
+  recordSession(key, shortId, longId) {
+    if (!shortId) return
+    this.sessionMap.set(shortId, {
+      shortId, longId: longId || null, key,
+      createdAt: (this.sessionMap.get(shortId) || {}).createdAt || Date.now(),
+      lastUsed: Date.now(),
+    })
+    this._save()
   }
 
   drop(key) {
@@ -346,11 +429,19 @@ class HermesPool {
     for (const [k, v] of [...this.map]) {
       if (!v.turn && now - v.lastUsed > this.ttlMs) this.drop(k)
     }
+    this._save()
   }
 
   stats() {
-    return { sessions: this.map.size, max: this.max,
-      keys: [...this.map.keys()].map((k) => String(k).slice(0, 12)) }
+    return {
+      sessions: this.map.size, max: this.max,
+      keys: [...this.map.keys()].map((k) => String(k).slice(0, 12)),
+      map: [...this.sessionMap.values()].map((it) => ({ shortId: it.shortId, longId: it.longId, key: String(it.key).slice(0, 12), lastUsed: it.lastUsed })),
+    }
+  }
+
+  listMap() {
+    return [...this.sessionMap.values()]
   }
 }
 

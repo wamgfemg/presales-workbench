@@ -19,6 +19,7 @@ ExecStart=/usr/bin/docker run --rm --name presales-workbench \
   --env-file /opt/presales-workbench/.env \
   -v /opt/presales-workbench/frontend:/app/frontend:ro \
   -v /opt/presales-workbench/server:/app/server:ro \
+  -v /opt/presales-workbench/data:/app/data \
   -w /app \
   node:22-alpine node /app/server/index.js
 ExecStop=/usr/bin/docker stop -t 5 presales-workbench

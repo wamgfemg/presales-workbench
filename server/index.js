@@ -3,6 +3,8 @@
  * 售前解决方案工作台 · BFF
  * - 托管前端静态文件（无需 Nginx）
  * - /api/chat 以 SSE 流式代理 Hermes Agent（profile=wordpresales）
+ * - 新增 /api/sessions：返回 Hermes wordpresales 历史会话，与本地任务对齐
+ * - 新增 /api/session/attach：把前端任务绑定到已有 Hermes session
  * - 零第三方依赖：仅用 Node 内置模块 + Node22 全局 fetch/WebSocket
  *
  * 前端永不直连 Hermes，凭证只存在于本进程的环境变量中。
@@ -95,6 +97,39 @@ async function serveStatic(req, res, urlPath) {
   fs.createReadStream(full).pipe(res)
 }
 
+/* ---------------- Hermes 通用：拿会话列表 ---------------- */
+async function hermesCookie() {
+  const url = process.env.HERMES_URL || 'http://127.0.0.1:9119'
+  const user = process.env.HERMES_USER || 'admin'
+  const pass = process.env.HERMES_PASS || ''
+  const r = await fetch(`${url}/auth/password-login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: user, password: pass, provider: 'basic' }),
+  })
+  if (!r.ok) throw new Error(`Hermes 登录失败 HTTP ${r.status}`)
+  let list = []
+  if (typeof r.headers.getSetCookie === 'function') list = r.headers.getSetCookie()
+  if (!list || !list.length) {
+    const one = r.headers.get('set-cookie')
+    list = one ? [one] : []
+  }
+  const cookie = list.map((s) => String(s).split(';')[0]).filter(Boolean).join('; ')
+  if (!cookie) throw new Error('Hermes 登录未返回 Cookie')
+  return cookie
+}
+
+async function hermesSessions() {
+  const url = process.env.HERMES_URL || 'http://127.0.0.1:9119'
+  const profile = process.env.HERMES_PROFILE || 'wordpresales'
+  const cookie = await hermesCookie()
+  const r = await fetch(`${url}/api/sessions`, { headers: { cookie } })
+  if (!r.ok) throw new Error(`Hermes /api/sessions 失败 HTTP ${r.status}`)
+  const data = await r.json()
+  const sessions = (data.sessions || []).filter((s) => s.profile === profile)
+  return sessions
+}
+
 /* ---------------- SSE 对话 ---------------- */
 async function handleChat(req, res) {
   let body
@@ -103,6 +138,7 @@ async function handleChat(req, res) {
   const key = String(body.key || body.taskId || 'default').slice(0, 64)
   const text = String(body.text || '').trim()
   const reset = !!body.reset
+  const sessionId = body.sessionId ? String(body.sessionId).slice(0, 64) : null
   if (!text) return sendJson(res, 400, { error: 'text 不能为空' })
 
   res.writeHead(200, {
@@ -123,12 +159,15 @@ async function handleChat(req, res) {
 
   if (reset) pool.drop(key)
 
-  const attempt = async (isRetry) => {
-    const sess = pool.get(key)
+  const attempt = async (isRetry, preferredSessionId) => {
+    const sess = pool.get(key, preferredSessionId)
     if (!sess.connected) {
       send({ type: 'status', text: isRetry ? '会话已失效，正在重建…' : '正在连接专家智能体…' })
-      await sess.open()
-      send({ type: 'session', sessionId: sess.sessionId, model: sess.model })
+      const info = await sess.open(preferredSessionId)
+      send({ type: 'session', sessionId: sess.sessionId, storedSessionId: sess.storedSessionId, model: sess.model })
+      if (info && info.sessionId) {
+        pool.recordSession(key, sess.sessionId, sess.storedSessionId)
+      }
     }
     return sess.submit(text, (ev) => send(ev))
   }
@@ -136,16 +175,18 @@ async function handleChat(req, res) {
   try {
     let result
     try {
-      result = await attempt(false)
+      result = await attempt(false, sessionId)
     } catch (e1) {
       const msg = String(e1 && e1.message || e1)
       const retryable = /session not found|WebSocket|未连接|已断开|断开|超时|closed|ECONN|fetch failed/i.test(msg)
       if (!retryable) throw e1
       log('第一次提交失败，重建会话重试：', msg)
       pool.drop(key)
-      result = await attempt(true)
+      result = await attempt(true, null)
     }
-    send({ type: 'done', text: result.text || '', status: result.status || 'complete', usage: result.usage || null })
+    // 记录本次使用的 session 映射
+    pool.recordSession(key, result.sessionId, result.storedSessionId)
+    send({ type: 'done', text: result.text || '', status: result.status || 'complete', usage: result.usage || null, sessionId: result.sessionId, storedSessionId: result.storedSessionId })
   } catch (err) {
     log('对话失败:', err && err.message)
     send({ type: 'error', message: String(err && err.message || err) })
@@ -153,6 +194,54 @@ async function handleChat(req, res) {
     clearInterval(beat)
     if (!closed) { try { res.end() } catch (_) {} }
   }
+}
+
+/* ---------------- Hermes 历史会话列表 ---------------- */
+async function handleSessions(req, res) {
+  try {
+    const sessions = await hermesSessions()
+    const localMap = pool.listMap()
+    const byLong = new Map()
+    for (const it of localMap) {
+      if (it.longId) byLong.set(it.longId, it)
+    }
+    const list = sessions.map((s) => {
+      const local = byLong.get(s.id) || null
+      return {
+        id: s.id,                       // long id（与 Hermes 历史列表一致）
+        shortId: local ? local.shortId : null,
+        localKey: local ? local.key : null,
+        preview: s.preview || '',
+        title: s.title || null,
+        messageCount: s.message_count || 0,
+        inputTokens: s.input_tokens || 0,
+        outputTokens: s.output_tokens || 0,
+        model: s.model || null,
+        profile: s.profile || null,
+        startedAt: s.started_at ? new Date(s.started_at * 1000).toISOString() : null,
+        lastActiveAt: s.last_active ? new Date(s.last_active * 1000).toISOString() : null,
+        isActive: !!s.is_active,
+        archived: !!s.archived,
+      }
+    })
+    return sendJson(res, 200, { ok: true, profile: process.env.HERMES_PROFILE || 'wordpresales', count: list.length, sessions: list, localMap })
+  } catch (err) {
+    log('获取 Hermes 会话列表失败:', err && err.message)
+    return sendJson(res, 502, { ok: false, error: String(err && err.message || err) })
+  }
+}
+
+/* ---------------- 绑定已有 Hermes session 到前端任务 ---------------- */
+async function handleAttach(req, res) {
+  let body
+  try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { error: e.message }) }
+  const key = String(body.key || body.taskId || '').slice(0, 64)
+  const shortId = body.shortId ? String(body.shortId).slice(0, 64) : null
+  const longId = body.longId ? String(body.longId).slice(0, 128) : null
+  if (!key || !shortId) return sendJson(res, 400, { error: 'key 与 shortId 必填' })
+  pool.attach(key, shortId, longId)
+  pool.drop(key) // 强制下次 get 时重建连接并复用 shortId
+  return sendJson(res, 200, { ok: true, key, shortId, longId })
 }
 
 /* ---------------- 健康检查 ---------------- */
@@ -180,6 +269,8 @@ const server = http.createServer(async (req, res) => {
   const url = req.url || '/'
   try {
     if (url.startsWith('/api/chat') && req.method === 'POST') return void (await handleChat(req, res))
+    if (url.startsWith('/api/sessions') && req.method === 'GET') return void (await handleSessions(req, res))
+    if (url.startsWith('/api/session/attach') && req.method === 'POST') return void (await handleAttach(req, res))
     if (url.startsWith('/api/health')) return void (await handleHealth(req, res))
     if (url.startsWith('/api/reset') && req.method === 'POST') {
       const b = await readBody(req).catch(() => ({}))

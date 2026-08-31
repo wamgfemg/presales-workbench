@@ -3,7 +3,12 @@
  * -------------------------------------------------------------------------
  * 本文件在 main.js 之后加载，覆盖原「本地模拟专家」的对话逻辑，
  * 改为通过同源 BFF（/api/chat, SSE 流式）与真实 Hermes 智能体对话。
- * 其余模块（项目管理 / 知识库 / C139 / 工具箱）逻辑完全不变。
+ * 设计要点：
+ *   - 每个前端任务对应一个 Hermes session，任务即历史对话。
+ *   - 新建任务为「纯新对话」，不再自动注入项目背景。
+ *   - 第一次用户发送或点击「生成完整初稿」时才创建 Hermes session。
+ *   - 任务对象保存 hxSessionId（短码）与 hxStoredSessionId（长码），刷新/重启可恢复。
+ *   - 其余模块（项目管理 / 知识库 / C139 / 工具箱）逻辑完全不变。
  * ========================================================================= */
 (function () {
   'use strict'
@@ -42,6 +47,13 @@
     + '.hx-err{color:#d33;font-size:12.5px;margin-top:6px}'
     + '.chip.hx-stop{background:rgba(239,83,80,.1);border-color:rgba(239,83,80,.35);color:#d33}'
     + '.chip.hx-gen{background:rgba(34,160,90,.1);border-color:rgba(34,160,90,.35);color:#1a8a4e;font-weight:700}'
+    + '.hx-empty{text-align:center;color:var(--sub);padding:30px 10px;font-size:13px;line-height:1.7}'
+    + '.hx-link{color:var(--brand);cursor:pointer;text-decoration:underline}'
+    + '.hx-sess-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;transition:.1s}'
+    + '.hx-sess-row:hover{background:#f8f9fb}'
+    + '.hx-sess-row .tt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.hx-sess-row .sub{font-size:11.5px;color:var(--sub)}'
+    + '.hx-sess-row .tag{font-size:11px;padding:1px 6px;border-radius:4px;background:#eef1f6}'
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st)
 
   /* ---------------- 健康检查徽标 ---------------- */
@@ -215,6 +227,16 @@
     if (el) el.textContent = s || ''
   }
 
+  function hxSaveSession(t, ev) {
+    if (!t || !ev) return
+    if (ev.sessionId && ev.sessionId !== t.hxSessionId) {
+      t.hxSessionId = ev.sessionId
+      t.hxStoredSessionId = ev.storedSessionId || t.hxStoredSessionId
+      t.hx = true
+      persist()
+    }
+  }
+
   function hxSend(t, text, opts) {
     opts = opts || {}
     if (!t) return Promise.resolve()
@@ -254,7 +276,7 @@
     return fetch(API + '/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ key: t.id, text: text, reset: !!opts.reset }),
+      body: JSON.stringify({ key: t.id, text: text, reset: !!opts.reset, sessionId: t.hxSessionId || null }),
       signal: ctrl.signal,
     }).then(function (r) {
       if (!r.ok || !r.body) throw new Error('后端返回 HTTP ' + r.status)
@@ -278,8 +300,15 @@
               try { ev = JSON.parse(payload) } catch (e) { return }
               if (ev.type === 'delta') { acc += ev.text || ''; aiMsg.text = acc; hxSetStatus(''); paint() }
               else if (ev.type === 'status') hxSetStatus(ev.text || '')
-              else if (ev.type === 'session') hxSetStatus('已连接（模型 ' + (ev.model || '—') + '），专家正在阅读项目资料…')
-              else if (ev.type === 'done') { finalText = ev.text || acc; hxSetStatus('') }
+              else if (ev.type === 'session') {
+                hxSaveSession(t, ev)
+                hxSetStatus('已连接（模型 ' + (ev.model || '—') + '），专家正在阅读项目资料…')
+              }
+              else if (ev.type === 'done') {
+                finalText = ev.text || acc
+                hxSaveSession(t, ev)
+                hxSetStatus('')
+              }
               else if (ev.type === 'error') { errText = ev.message || '未知错误'; hxSetStatus('') }
             })
           })
@@ -310,15 +339,18 @@
       body: JSON.stringify({ key: t.id }),
     }).catch(function () {})
     t.msgs = []
+    delete t.hxSessionId
+    delete t.hxStoredSessionId
     t.status = t.draft ? 'draft' : 'chat'
     persist()
     var D = DOC_TYPES[t.type]
-    say(t, 'ai', '（会话已重置）我是「' + D.expert + '」' + D.emo + '，正在重新载入项目背景…')
-    hxSend(t, hxKickoff(t), { hidden: true, statusText: '正在重新载入项目背景…' })
+    say(t, 'ai', '（会话已重置）我是「' + D.expert + '」' + D.emo + '。新对话已开始，可随时输入消息或点击「生成完整初稿」。')
+    renderRightPanel(); renderTaskList()
   }
   window.hxReset = hxReset
 
   /* ---------------- 覆盖：创建任务 ---------------- */
+  // 原 main.js 的 createDocTask 会走本地问答流程；我们整体替换为「纯新对话」，不再自动注入背景。
   window.createDocTask = function (type) {
     var pid = document.getElementById('docProj').value
     if (!pid) { toast('请先在①关联项目'); return }
@@ -335,15 +367,14 @@
     persist()
     curTaskId = t.id; curType = type; docMode = 'chat'; docView = 'task'
 
-    var filled = (typeof BG_FIELDS !== 'undefined' && p.bg)
-      ? BG_FIELDS.filter(function (f) { return !!p.bg[f[0]] }).length : 0
-    say(t, 'ai', '您好！我是「' + D.expert + '」' + D.emo + '，由 Hermes 智能体（' + (D.name) + '）为您服务。\n'
-      + '项目：' + p.name + '\n客户：' + p.customer + ' · 阶段：' + p.stage
-      + (typeof c139Stats === 'function' ? ' · C139 赢单率 ' + c139Stats(p.c139).rate + '%' : '') + '\n'
-      + '已自动注入项目背景收集表（' + filled + '/' + ((typeof BG_FIELDS !== 'undefined' && BG_FIELDS.length) || 9) + ' 项已填）与匹配的知识库素材。')
-    renderTaskList(); renderTypeCards()
-    hxSend(t, hxKickoff(t), { hidden: true, statusText: '正在载入项目背景并规划提问…' })
-    toast('任务已创建，专家正在接入')
+    say(t, 'ai', '新对话已创建。\n'
+      + '项目：' + p.name + ' · 客户：' + p.customer + ' · 阶段：' + p.stage + '\n'
+      + '你可以：\n'
+      + '1. 直接输入消息开始对话（此时我会创建新的 Hermes 会话并记住本次任务）；\n'
+      + '2. 点下方「生成完整初稿」一次性注入项目背景并产出正文；\n'
+      + '3. 点「Hermes 历史会话」把已有历史对话关联到本任务。')
+    renderTaskList(); renderTypeCards(); renderRightPanel()
+    toast('新对话已创建，未自动注入背景')
   }
 
   /* ---------------- 覆盖：发送消息 ---------------- */
@@ -379,10 +410,112 @@
     })
   }
 
-  /* ---------------- 覆盖：对话区渲染（支持流式） ---------------- */
+  /* ---------------- 历史 Hermes 会话列表 ---------------- */
+  function hxSessionLabel(s) {
+    var title = s.title || (s.preview || '').slice(0, 40)
+    if (!title) title = '未命名会话'
+    return title
+  }
+
+  function hxFormatTime(iso) {
+    if (!iso) return ''
+    try {
+      var d = new Date(iso)
+      return d.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    } catch (e) { return iso }
+  }
+
+  window.hxOpenSessions = function () {
+    var el = document.getElementById('hxSessionsPanel')
+    if (!el) {
+      el = document.createElement('div')
+      el.id = 'hxSessionsPanel'
+      el.className = 'mask on'
+      el.innerHTML = '<div class="modal" style="max-width:720px">'
+        + '<div class="m-head"><b>Hermes 历史会话</b><button class="btn sm ghost" onclick="hxCloseSessions()">关闭</button></div>'
+        + '<div id="hxSessionsBody" style="max-height:60vh;overflow:auto"></div></div>'
+      document.body.appendChild(el)
+    } else {
+      el.classList.add('on')
+    }
+    document.getElementById('hxSessionsBody').innerHTML = '<div class="hx-empty">正在加载…</div>'
+    fetch(API + '/api/sessions').then(function (r) { return r.json() }).then(function (d) {
+      if (!d.ok) throw new Error(d.error || '加载失败')
+      var list = d.sessions || []
+      var byKey = {}
+      ;(store.tasks || []).forEach(function (t) {
+        if (t.hxStoredSessionId) byKey[t.hxStoredSessionId] = t
+      })
+      var html = ''
+      if (!list.length) {
+        html = '<div class="hx-empty">暂无 Hermes 历史会话</div>'
+      } else {
+        list.forEach(function (s) {
+          var localTask = byKey[s.id]
+          var meta = (s.profile || '') + ' · ' + (s.messageCount || 0) + ' 条消息 · ' + hxFormatTime(s.lastActiveAt || s.startedAt)
+          var canBind = !!s.shortId
+          html += '<div class="hx-sess-row" data-short="' + esc(s.shortId || '') + '" data-long="' + esc(s.id) + '" onclick="hxPickSession(this)">'
+            + '<span class="qw-ico">💬</span>'
+            + '<div class="tt"><b>' + esc(hxSessionLabel(s)) + '</b><div class="sub">' + esc(meta) + '</div></div>'
+            + (localTask ? '<span class="tag" style="background:#e6f4ea;color:var(--ok)">已关联：' + esc((localTask.title || '').slice(0, 12)) + '</span>' : '<span class="tag">' + (canBind ? '未关联 · 可绑定' : '未关联 · 缺短码') + '</span>')
+            + '</div>'
+        })
+      }
+      document.getElementById('hxSessionsBody').innerHTML = html
+    }).catch(function (e) {
+      document.getElementById('hxSessionsBody').innerHTML = '<div class="hx-empty">加载失败：' + esc(String(e && e.message || e)) + '</div>'
+    })
+  }
+  window.hxCloseSessions = function () {
+    var el = document.getElementById('hxSessionsPanel')
+    if (el) el.classList.remove('on')
+  }
+
+  // 选择历史会话：如果已关联本地任务则打开；否则绑定到当前任务（需要 shortId）
+  window.hxPickSession = function (el) {
+    var longId = el.dataset.long
+    var shortId = el.dataset.short
+    var t = (store.tasks || []).find(function (x) { return x.hxStoredSessionId === longId })
+    if (t) {
+      hxCloseSessions()
+      openTaskQw(t.id)
+      toast('已打开关联任务')
+      return
+    }
+    if (!shortId) {
+      toast('该会话缺少短码，无法继续对话。建议新建任务开始新对话。')
+      return
+    }
+    // 未关联：询问是否把当前任务绑定到该会话
+    t = curTaskId ? getTask(curTaskId) : null
+    if (!t) { toast('请先创建一个任务，再关联历史会话'); return }
+    if (!confirm('把当前任务「' + (t.title || DOC_TYPES[t.type].name) + '」关联到该 Hermes 会话？')) return
+    fetch(API + '/api/session/attach', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: t.id, shortId: shortId, longId: longId }),
+    }).then(function (r) { return r.json() }).then(function (d) {
+      if (!d.ok) throw new Error(d.error || '关联失败')
+      t.hxSessionId = shortId
+      t.hxStoredSessionId = longId
+      persist()
+      hxCloseSessions()
+      renderTaskList(); renderRightPanel()
+      toast('已关联 Hermes 会话：' + shortId)
+    }).catch(function (e) {
+      toast('关联失败：' + (e && e.message || e))
+    })
+  }
+
+  /* ---------------- 覆盖：对话区渲染（支持流式 + 空状态） ---------------- */
   window.chatBodyHtml = function (t) {
     var D = DOC_TYPES[t.type]
     var h = '<div class="chat-body">'
+    if (!t.msgs || !t.msgs.length) {
+      h += '<div class="hx-empty">'
+        + '🤖 这是一个全新的 Hermes 对话<br>'
+        + '直接输入消息，或点击下方「生成完整初稿」开始'
+        + '</div>'
+    }
     t.msgs.forEach(function (m) {
       if (m.streaming) {
         h += '<div class="msg ai"><div class="m-av">' + D.emo + '</div><div class="bubble">'
@@ -405,6 +538,7 @@
       h += '<span class="chip" onclick="pickKbForAnswer(\'' + t.id + '\')">📚 @知识库素材</span>'
       h += '<span class="chip" onclick="hxSend(getTask(\'' + t.id + '\'),\'请基于当前信息，补充说明我方相对竞争对手的差异化优势，条目式，不超过 8 条。\')">💡 追问差异化优势</span>'
       h += '<span class="chip" onclick="hxReset(\'' + t.id + '\')">🔄 重开会话</span>'
+      h += '<span class="chip" onclick="hxOpenSessions()">📜 Hermes 历史会话</span>'
     }
     h += '</div>'
     return h
@@ -414,7 +548,7 @@
   window.qwInputBar = function (t) {
     var active = !!t && docMode === 'chat' && !hxBusy(t.id)
     var ph = t
-      ? (hxBusy(t.id) ? '专家正在回复中…' : '回复「' + DOC_TYPES[t.type].expert + '」，或直接提出你的要求（回车发送）')
+      ? (hxBusy(t.id) ? '专家正在回复中…' : '输入消息，回车发送给 Hermes · wordpresales')
       : '今天帮你做些什么？请先在左侧选择文档类型并发起新对话'
     return '<div class="qw-input">'
       + '<input id="chatIn" ' + (active ? '' : 'disabled') + ' placeholder="' + esc(ph) + '" '
@@ -427,7 +561,24 @@
       + '</div></div>'
   }
 
-  /* ---------------- 渲染后回填流式文本（避免重绘丢内容） ---------------- */
+  /* ---------------- 覆盖：任务列表渲染，增加 Hermes 绑定标识 ---------------- */
+  var _renderTaskList = window.renderTaskList
+  window.renderTaskList = function () {
+    _renderTaskList()
+    // 在任务列表底部追加历史会话入口（如果列表容器存在）
+    var el = document.getElementById('taskList')
+    if (!el) return
+    var foot = document.getElementById('hxTaskFoot')
+    if (!foot) {
+      foot = document.createElement('div')
+      foot.id = 'hxTaskFoot'
+      foot.style.cssText = 'padding:10px 12px;text-align:center;border-top:1px dashed var(--line);'
+      foot.innerHTML = '<span class="hx-link" onclick="hxOpenSessions()">📜 查看 Hermes 历史会话</span>'
+      el.parentNode.appendChild(foot)
+    }
+  }
+
+  /* ---------------- 覆盖：右侧面板，在历史会话弹窗关闭后重新渲染 ---------------- */
   var _rrp = window.renderRightPanel
   window.renderRightPanel = function () {
     _rrp.apply(this, arguments)
