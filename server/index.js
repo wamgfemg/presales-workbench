@@ -329,7 +329,7 @@ const server = http.createServer(async (req, res) => {
     if (url.startsWith('/api/weknora/knowledge/') && req.method === 'DELETE') {
       const itemId = decodeURIComponent(url.slice('/api/weknora/knowledge/'.length).split('?')[0])
       if (!itemId) return sendJson(res, 400, { error: '缺少文档 ID' })
-      return proxyToWeKnora(req, res, `/knowledge-bases/${WEKNORA_KB_ID}/knowledge/${itemId}`)
+      return proxyToWeKnora(req, res, `/knowledge/${itemId}`)
     }
 
     if (url.startsWith('/api/reset') && req.method === 'POST') {
