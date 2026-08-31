@@ -84,6 +84,7 @@ tr:hover td{background:#f8faff}
 .kb-item b{font-size:14px}
 .kb-item .meta{font-size:11.5px;color:var(--sub);margin:5px 0}
 .kb-item .body{font-size:12.5px;color:#414a5f;background:#f8fafd;border-radius:8px;padding:10px;margin-top:8px;max-height:120px;overflow:auto;white-space:pre-wrap}
+.kb-cat-sel{font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#3a4358;max-width:170px}
 .hl{background:#fff3bf;border-radius:3px}
 /* ===== C139 ===== */
 .c139-grid{display:grid;grid-template-columns:300px 1fr;gap:16px}

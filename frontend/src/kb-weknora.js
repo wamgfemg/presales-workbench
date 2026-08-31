@@ -1,6 +1,19 @@
 /* ================= 向量知识库 · WeKnora 真实对接（覆盖 main.js 中的同名函数） ================= */
 let WEK = { enabled: null, base: null, items: [], loading: false, error: '', loadedAt: 0 }
 
+/* 目录归属映射：WeKnora 文档本身不带目录，目录是前端本地组织层。
+   键=文档 id，值=目录节点 id（null/缺失 = 未归类，仅出现在「全部知识」）。 */
+let WEK_CATM = {}
+try { WEK_CATM = JSON.parse(localStorage.getItem('weknora_catmap') || '{}') || {} } catch (e) { WEK_CATM = {} }
+function saveCatMap() { try { localStorage.setItem('weknora_catmap', JSON.stringify(WEK_CATM)) } catch (e) {} }
+function catOfDoc(it) { return WEK.enabled ? (WEK_CATM[it.id] || null) : ((store.kb.find(k => k.id === it.id) || {}).catId || null) }
+function docsInCat(nodeId) {
+  const src = WEK.enabled ? WEK.items : store.kb
+  if (nodeId === 'all') return src
+  const ids = descIds(nodeId)
+  return src.filter(it => { const c = catOfDoc(it); return c && ids.indexOf(c) >= 0 })
+}
+
 function fmtDate(d) {
   if (!d) return '—'
   const dt = new Date(d)
@@ -45,17 +58,22 @@ function renderKb() {
   else if (WEK.error) statusHtml = `WeKnora 连接失败：${esc(WEK.error)}`
   else if (WEK.enabled) statusHtml = `已连接 WeKnora「${esc(WEK.base && WEK.base.name || '售前工具箱')}」· ${WEK.items.length} 个文档`
   else statusHtml = '本地模拟向量库'
-  crumb.innerHTML = `当前目录：<b>${kbSelCat === 'all' ? '全部知识' : esc(catName(kbSelCat))}</b> · ${statusHtml}`
+  crumb.innerHTML = `当前目录：<b>${kbSelCat === 'all' ? '全部知识' : esc(catName(kbSelCat))}</b> · ${statusHtml} · 本目录 ${docsInCat(kbSelCat).length} 个文档`
 
   if (WEK.loading && !WEK.items.length) { el.innerHTML = '<div class="empty">正在从 WeKnora 加载知识库文档…</div>'; return }
   if (WEK.error && !WEK.items.length) { el.innerHTML = `<div class="empty">WeKnora 加载失败<br><small>${esc(WEK.error)}</small><br><button class="btn sm" style="margin-top:10px" onclick="loadWeKnoraKb(true)">重试</button></div>`; return }
 
   const kw = (document.getElementById('kbSearch').value || '').toLowerCase().split(/\s+/).filter(Boolean)
-  let list = WEK.enabled ? WEK.items.slice() : []
+  // 先按左侧选中的目录过滤（全部知识 = 不过滤；具体目录 = 仅该目录及子目录归属的文档）
+  let list = docsInCat(kbSelCat).slice()
   if (kw.length) list = list.filter(it => kw.some(w => ((it.title || '') + ' ' + (it.description || '')).toLowerCase().includes(w)))
 
   if (!list.length) {
-    el.innerHTML = '<div class="empty">当前知识库暂无匹配文档<br>点击右上角「🚀 添加内容 · 向量化入库」上传文件到 WeKnora</div>'
+    if (WEK.enabled && kbSelCat !== 'all' && !kw.length) {
+      el.innerHTML = '<div class="empty">该目录下暂无文档<br><small>未归类的历史文档只在「全部知识」下显示；上传时选好目录即可归入此处</small></div>'
+    } else {
+      el.innerHTML = '<div class="empty">当前知识库暂无匹配文档<br>点击右上角「🚀 添加内容 · 向量化入库」上传文件到 WeKnora</div>'
+    }
     return
   }
 
@@ -74,6 +92,10 @@ function renderKb() {
         ${statusTag}
         <span class="tag">${it.enable_status === 'enabled' ? '已启用' : '未启用'}</span>
         <div style="flex:1"></div>
+        <select class="kb-cat-sel" title="归类到目录" onchange="WEK_CATM['${it.id}']=this.value||null;saveCatMap();renderKb()">
+          <option value="">全部知识（未归类）</option>
+          ${store.kbTree.map(n => { let d = 0, p = n.pid; while (p) { d++; const q = store.kbTree.find(x => x.id === p); p = q ? q.pid : null } return `<option value="${n.id}" ${(WEK_CATM[it.id] || '') === n.id ? 'selected' : ''}>${'　'.repeat(d)}${esc(n.name)}</option>` }).join('')}
+        </select>
         <button class="btn sm ghost" onclick="previewWekDoc('${it.id}')">预览</button>
         <button class="btn sm danger" onclick="deleteWekDoc('${it.id}')">删除</button>
       </div>
@@ -81,6 +103,39 @@ function renderKb() {
       <div class="body">${esc((it.description || '').slice(0, 600))}${(it.description || '').length > 600 ? '…' : ''}</div>
     </div>`
   }).join('')
+}
+
+/* 覆盖 main.js 的 renderKbTree：目录树数量改为统计真实 WeKnora 文档（或本地 mock），
+   未归类的文档只计入「全部知识」，不计入任何具体目录节点。 */
+function renderKbTree() {
+  const treeEl = document.getElementById('kbTree')
+  if (!treeEl) return
+  function node(n, depth) {
+    const kids = childrenOf(n.id)
+    const cnt = docsInCat(n.id).length
+    return `<div class="tnode ${kbSelCat === n.id ? 'on' : ''}" style="padding-left:${8 + depth * 14}px" onclick="kbSelCat='${n.id}';renderKb()">
+      <span>📁 ${esc(n.name)}</span><b class="tc">${cnt}</b>
+      <span class="tnode-ops"><button title="新建子目录" onclick="event.stopPropagation();addCatNode('${n.id}')">＋</button><button title="重命名" onclick="event.stopPropagation();renameCatNode('${n.id}')">✎</button><button title="删除" onclick="event.stopPropagation();delCatNode('${n.id}')">✕</button></span></div>` +
+      kids.map(k => node(k, depth + 1)).join('')
+  }
+  treeEl.innerHTML =
+    `<div class="tnode ${kbSelCat === 'all' ? 'on' : ''}" onclick="kbSelCat='all';renderKb()"><span>📚 全部知识</span><b class="tc">${docsInCat('all').length}</b></div>` +
+    childrenOf(null).map(n => node(n, 0)).join('')
+}
+
+/* 覆盖 main.js 的 delCatNode：删除目录时同时清理 WeKnora 文档的目录归属 */
+function delCatNode(id) {
+  const n = store.kbTree.find(x => x.id === id)
+  if (!n) return
+  if (!confirm('删除目录「' + n.name + '」？\n子目录上提一层，目录内知识移至上级')) return
+  const ids = descIds(id)
+  Object.keys(WEK_CATM).forEach(k => { if (ids.indexOf(WEK_CATM[k]) >= 0) delete WEK_CATM[k] })
+  saveCatMap()
+  childrenOf(id).forEach(k => k.pid = n.pid)
+  store.kb.forEach(k => { if (k.catId === id) k.catId = n.pid || null })
+  store.kbTree = store.kbTree.filter(x => x.id !== id)
+  if (kbSelCat === id) kbSelCat = n.pid || 'all'
+  persist(); renderKb()
 }
 
 function previewWekDoc(id) {
@@ -119,6 +174,7 @@ function openWizard() {
   wz = {
     files: [], step: 1, parse: 'precise', ext: { img: true, ocr: true, table: true },
     filterTxt: '', segMode: 'auto', segLen: 512, cur: 0,
+    catId: kbSelCat !== 'all' ? kbSelCat : ((childrenOf(null)[0] || {}).id || ''),
     uploading: false, uploadResults: [], allDone: false, error: ''
   }
   renderWz(); openMask('mWizard')
@@ -171,6 +227,11 @@ function wzHandle(fl) {
 
 function wzS2() {
   return `<div class="hint">📁 目标知识库：${WEK.enabled ? 'WeKnora「' + esc(WEK.base && WEK.base.name || '售前工具箱') + '」' : '（WeKnora 未连接，上传将失败）'}</div>
+  <div style="font-weight:700;margin:14px 0 8px">入库目录</div>
+  <select id="wzCat" onchange="wz.catId=this.value;toast('将归入：'+(this.value?catName(this.value):'全部知识（未归类）'))" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+    <option value="" ${wz.catId ? '' : 'selected'}>（不指定目录 · 归入「全部知识」，后续可在目录树归类）</option>
+    ${store.kbTree.map(n => { let d = 0, p = n.pid; while (p) { d++; const q = store.kbTree.find(x => x.id === p); p = q ? q.pid : null } return `<option value="${n.id}" ${wz.catId === n.id ? 'selected' : ''}>${'　'.repeat(d)}${esc(n.name)}</option>` }).join('')}
+  </select>
   <div style="font-weight:700;margin:14px 0 8px">文档解析策略</div>
   <div class="wz-opt ${wz.parse === 'precise' ? 'on' : ''}" onclick="wz.parse='precise';renderWz()"><b>精准解析</b><p>提取图片、表格、OCR 等元素，需要更长时间</p>
     ${wz.parse === 'precise' ? `<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">
@@ -291,6 +352,9 @@ async function wzUploadAll() {
       const r = await fetch('/api/weknora/upload', { method: 'POST', body: form })
       const data = await r.json()
       f.p = 100
+      // 抓取新建文档 id，归入所选目录（WeKnora 文档本身无目录概念，目录为前端本地归属）
+      const newId = (data && data.data && (data.data.id || data.data.knowledge_id)) || (data && data.id) || null
+      if (newId) { WEK_CATM[newId] = wz.catId || null; saveCatMap() }
       wz.uploadResults.push({ name: f.name, ok: data.success === true, error: data.success === true ? '' : (data.error && data.error.message || data.message || '上传失败') })
     } catch (e) {
       f.p = 100
