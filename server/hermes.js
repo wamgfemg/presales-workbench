@@ -407,6 +407,10 @@ class HermesPool {
 
   recordSession(key, shortId, longId) {
     if (!shortId) return
+    // 清理该 key 的旧映射，保证一个 key 只对应一个 session
+    for (const [sid, it] of this.sessionMap) {
+      if (it.key === key && sid !== shortId) this.sessionMap.delete(sid)
+    }
     this.sessionMap.set(shortId, {
       shortId, longId: longId || null, key,
       createdAt: (this.sessionMap.get(shortId) || {}).createdAt || Date.now(),
