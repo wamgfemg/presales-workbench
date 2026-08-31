@@ -75,6 +75,7 @@ function renderKb() {
         <span class="tag">${it.enable_status === 'enabled' ? '已启用' : '未启用'}</span>
         <div style="flex:1"></div>
         <button class="btn sm ghost" onclick="previewWekDoc('${it.id}')">预览</button>
+        <button class="btn sm danger" onclick="deleteWekDoc('${it.id}')">删除</button>
       </div>
       <div class="meta">更新于 ${fmtDate(it.updated_at || it.created_at)} · ${esc(it.file_name || '')}</div>
       <div class="body">${esc((it.description || '').slice(0, 600))}${(it.description || '').length > 600 ? '…' : ''}</div>
@@ -93,6 +94,24 @@ function previewWekDoc(id) {
     <span class="tag">${it.enable_status === 'enabled' ? '已启用' : '未启用'}</span>
   </div><div style="white-space:pre-wrap">${esc(it.description || '暂无描述')}</div>`
   openMask('mDocView')
+}
+
+async function deleteWekDoc(id) {
+  const it = WEK.items.find(x => x.id === id)
+  if (!it) return
+  if (!confirm(`确认从 WeKnora「${WEK.base && WEK.base.name || '售前工具箱'}」删除文档「${it.title || it.file_name}」？此操作不可恢复。`)) return
+  try {
+    const r = await fetch('/api/weknora/knowledge/' + encodeURIComponent(id), { method: 'DELETE' })
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}))
+      throw new Error(err.error || ('删除失败（HTTP ' + r.status + ')'))
+    }
+    WEK.items = WEK.items.filter(x => x.id !== id)
+    toast('已删除：' + (it.title || it.file_name))
+    renderKb()
+  } catch (e) {
+    alert('删除失败：' + (e && e.message || e))
+  }
 }
 
 /* ---- 四步向量化入库向导（真实上传到 WeKnora） ---- */
