@@ -326,6 +326,11 @@ const server = http.createServer(async (req, res) => {
     if (url.startsWith('/api/weknora/upload') && req.method === 'POST') {
       return proxyToWeKnora(req, res, `/knowledge-bases/${WEKNORA_KB_ID}/knowledge/file`)
     }
+    if (url.startsWith('/api/weknora/knowledge/') && req.method === 'DELETE') {
+      const itemId = decodeURIComponent(url.slice('/api/weknora/knowledge/'.length).split('?')[0])
+      if (!itemId) return sendJson(res, 400, { error: '缺少文档 ID' })
+      return proxyToWeKnora(req, res, `/knowledge-bases/${WEKNORA_KB_ID}/knowledge/${itemId}`)
+    }
 
     if (url.startsWith('/api/reset') && req.method === 'POST') {
       const b = await readBody(req).catch(() => ({}))
