@@ -15,6 +15,7 @@ PORT="${PORT:-8088}"
 HERMES_URL="${HERMES_URL:-http://127.0.0.1:9119}"
 HERMES_USER="${HERMES_USER:-admin}"
 HERMES_PROFILE="${HERMES_PROFILE:-wordpresales}"
+WEKNORA_URL="${WEKNORA_URL:-http://127.0.0.1:8080}"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "==> 应用目录 $APP_DIR"
@@ -29,6 +30,11 @@ if [ -z "${HERMES_PASS:-}" ] && [ -f "$APP_DIR/.env" ]; then
   echo "    已存在 .env 且未传入 HERMES_PASS，保留原有凭证"
 else
   : "${HERMES_PASS:?必须提供 HERMES_PASS（Hermes 控制台密码）}"
+  # 保留已有 WeKnora 配置，避免重复 setup 时覆盖
+  if [ -f "$APP_DIR/.env" ]; then
+    WEKNORA_API_KEY="${WEKNORA_API_KEY:-$(grep '^WEKNORA_API_KEY=' "$APP_DIR/.env" | cut -d= -f2-)}"
+    WEKNORA_KB_ID="${WEKNORA_KB_ID:-$(grep '^WEKNORA_KB_ID=' "$APP_DIR/.env" | cut -d= -f2-)}"
+  fi
   cat > "$APP_DIR/.env" <<EOF
 PORT=$PORT
 BIND_HOST=0.0.0.0
@@ -40,6 +46,9 @@ HERMES_PASS=$HERMES_PASS
 HERMES_PROFILE=$HERMES_PROFILE
 HERMES_MAX_SESSIONS=8
 HERMES_SESSION_TTL_MS=2700000
+WEKNORA_URL=$WEKNORA_URL
+WEKNORA_API_KEY=${WEKNORA_API_KEY:-}
+WEKNORA_KB_ID=${WEKNORA_KB_ID:-}
 NODE_OPTIONS=--max-old-space-size=192
 EOF
   chmod 600 "$APP_DIR/.env"

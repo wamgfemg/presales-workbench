@@ -244,6 +244,40 @@ async function handleAttach(req, res) {
   return sendJson(res, 200, { ok: true, key, shortId, longId })
 }
 
+/* ---------------- WeKnora 代理 ---------------- */
+const WEKNORA_URL = process.env.WEKNORA_URL || 'http://127.0.0.1:8080'
+const WEKNORA_API_KEY = process.env.WEKNORA_API_KEY || ''
+const WEKNORA_KB_ID = process.env.WEKNORA_KB_ID || ''
+const WEKNORA_ENABLED = !!(WEKNORA_API_KEY && WEKNORA_KB_ID)
+
+function proxyToWeKnora(req, res, targetPath, search) {
+  if (!WEKNORA_ENABLED) return sendJson(res, 503, { error: 'WeKnora 未配置' })
+  const base = new URL(WEKNORA_URL)
+  const qs = search || ''
+  const options = {
+    protocol: base.protocol,
+    hostname: base.hostname,
+    port: base.port || (base.protocol === 'https:' ? 443 : 80),
+    path: `/api/v1${targetPath}${qs}`,
+    method: req.method,
+    headers: { ...req.headers, 'x-api-key': WEKNORA_API_KEY },
+  }
+  delete options.headers.host
+  delete options.headers.connection
+  delete options.headers['content-length'] // 让 Node 根据实际 body 重新计算
+
+  const proxyReq = http.request(options, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode, proxyRes.headers)
+    proxyRes.pipe(res)
+  })
+  proxyReq.on('error', (err) => {
+    log('WeKnora 代理失败:', err && err.message)
+    if (!res.headersSent) sendJson(res, 502, { error: 'WeKnora 代理失败: ' + (err && err.message) })
+    else { try { res.end() } catch (_) {} }
+  })
+  req.pipe(proxyReq)
+}
+
 /* ---------------- 健康检查 ---------------- */
 async function handleHealth(req, res) {
   const out = {
@@ -253,6 +287,8 @@ async function handleHealth(req, res) {
     frontDir: FRONT_DIR,
     profile: process.env.HERMES_PROFILE || 'wordpresales',
     hermesUrl: process.env.HERMES_URL || 'http://127.0.0.1:9119',
+    weknoraEnabled: WEKNORA_ENABLED,
+    weknoraKbId: WEKNORA_KB_ID || null,
     pool: pool.stats(),
     memoryMB: Math.round(process.memoryUsage().rss / 1048576),
     node: process.version,
@@ -261,6 +297,12 @@ async function handleHealth(req, res) {
     const r = await fetch(out.hermesUrl + '/', { method: 'GET' })
     out.hermesReachable = r.status
   } catch (e) { out.hermesReachable = 'unreachable: ' + (e && e.message) }
+  if (WEKNORA_ENABLED) {
+    try {
+      const r = await fetch(`${WEKNORA_URL}/api/v1/knowledge-bases/${WEKNORA_KB_ID}`, { headers: { 'x-api-key': WEKNORA_API_KEY } })
+      out.weknoraReachable = r.status
+    } catch (e) { out.weknoraReachable = 'unreachable: ' + (e && e.message) }
+  }
   sendJson(res, 200, out)
 }
 
@@ -272,6 +314,19 @@ const server = http.createServer(async (req, res) => {
     if (url.startsWith('/api/sessions') && req.method === 'GET') return void (await handleSessions(req, res))
     if (url.startsWith('/api/session/attach') && req.method === 'POST') return void (await handleAttach(req, res))
     if (url.startsWith('/api/health')) return void (await handleHealth(req, res))
+
+    /* WeKnora 代理：前端通过 BFF 间接访问 WeKnora，避免暴露 API Key 与 8080 端口 */
+    if (url.startsWith('/api/weknora/knowledge-base') && req.method === 'GET') {
+      return proxyToWeKnora(req, res, `/knowledge-bases/${WEKNORA_KB_ID}`)
+    }
+    if (url.startsWith('/api/weknora/knowledge') && req.method === 'GET') {
+      const search = url.replace(/^\/api\/weknora\/knowledge/, '')
+      return proxyToWeKnora(req, res, `/knowledge-bases/${WEKNORA_KB_ID}/knowledge`, search)
+    }
+    if (url.startsWith('/api/weknora/upload') && req.method === 'POST') {
+      return proxyToWeKnora(req, res, `/knowledge-bases/${WEKNORA_KB_ID}/knowledge/file`)
+    }
+
     if (url.startsWith('/api/reset') && req.method === 'POST') {
       const b = await readBody(req).catch(() => ({}))
       pool.drop(String(b.key || b.taskId || 'default').slice(0, 64))
@@ -296,6 +351,7 @@ server.listen(PORT, HOST, () => {
   log(`静态目录: ${FRONT_DIR}`)
   log(`Hermes: ${process.env.HERMES_URL || 'http://127.0.0.1:9119'}  profile=${process.env.HERMES_PROFILE || 'wordpresales'}`)
   if (!process.env.HERMES_PASS) log('警告：未设置 HERMES_PASS，对话将无法鉴权')
+  log(`WeKnora: ${WEKNORA_ENABLED ? '已启用 KB=' + WEKNORA_KB_ID : '未配置'}`)
 })
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

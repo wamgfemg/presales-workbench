@@ -86,7 +86,7 @@
 
     <!-- ============ 向量知识库 ============ -->
     <section class="page" id="p-kb">
-      <div class="page-head"><div><h2>向量知识库</h2><div class="desc">目录树管理 · 四步向量化入库（上传→创建设置→分段预览→数据处理）· 召回调试；本地为模拟向量，后续可对接真实向量库服务</div></div>
+      <div class="page-head"><div><h2>向量知识库</h2><div class="desc">目录树管理 · 四步向量化入库（上传→创建设置→分段预览→数据处理）· 召回调试；已对接 WeKnora 真实向量库（售前工具箱）</div></div>
         <div style="display:flex;gap:8px">
           <button class="btn ghost" onclick="openDebug()">🔍 召回调试</button>
           <button class="btn" onclick="openWizard()">🚀 添加内容 · 向量化入库</button></div></div>
@@ -248,6 +248,8 @@
 
 
   <script src="./src/main.js"></script>
+  <!-- 向量知识库：接入 WeKnora 真实知识库，覆盖 main.js 中的本地模拟逻辑 -->
+  <script src="./src/kb-weknora.js"></script>
   <!-- 方案制作中心：接入 Hermes Agent(wordpresales) 真实对话，必须在 main.js 之后加载以覆盖本地模拟逻辑 -->
   <script src="./src/hermes-chat.js"></script>
 </body>
