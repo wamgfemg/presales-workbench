@@ -17,6 +17,8 @@
 
   /* 运行态放在内存里，绝不写进 localStorage（否则刷新后会残留"回复中"把输入框锁死） */
   var HX_BUSY = {}, HX_CTRL = {}
+  /* 当前任务的文件附件：key=taskId, value=[{name,text,chars,ext}] */
+  var HX_ATTACH = {}
   function hxBusy(id) { return !!HX_BUSY[id] }
   window.hxBusy = hxBusy
 
@@ -54,6 +56,13 @@
     + '.hx-sess-row .tt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
     + '.hx-sess-row .sub{font-size:11.5px;color:var(--sub)}'
     + '.hx-sess-row .tag{font-size:11px;padding:1px 6px;border-radius:4px;background:#eef1f6}'
+    + '.hx-attach{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:6px;background:#f2f7ff;border:1px solid #d6e4ff;font-size:12px;color:#2563eb;max-width:260px;cursor:default;margin:4px 0}'
+    + '.hx-attach .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+    + '.hx-attach .x{cursor:pointer;padding:2px 4px;border-radius:4px}'
+    + '.hx-attach .x:hover{background:#e0ecff}'
+    + '.hx-attach .meta{font-size:10px;color:var(--sub)}'
+    + '.hx-attach-row{display:flex;flex-wrap:wrap;gap:6px;padding:6px 10px}'
+    + '.hx-attach-err{color:var(--bad);font-size:11px;padding:4px 10px}'
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st)
 
   /* ---------------- 健康检查徽标 ---------------- */
@@ -237,6 +246,89 @@
     }
   }
 
+  /* ---------------- 文件附件：前端选文件 → BFF 提取文本 ---------------- */
+  function hxFileToBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader()
+      r.onload = function () { resolve(r.result.split(',')[1]) }
+      r.onerror = function () { reject(new Error('读取文件失败')) }
+      r.readAsDataURL(file)
+    })
+  }
+
+  function hxExtractFile(file) {
+    return hxFileToBase64(file).then(function (b64) {
+      return fetch(API + '/api/chat/extract', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: file.name, base64: b64 }),
+      }).then(function (r) {
+        if (!r.ok) {
+          return r.json().then(function (d) { throw new Error(d.error || ('提取失败 HTTP ' + r.status)) })
+            .catch(function () { throw new Error('提取失败 HTTP ' + r.status) })
+        }
+        return r.json()
+      })
+    })
+  }
+
+  window.hxAttachFile = function (input) {
+    var t = curTaskId ? getTask(curTaskId) : null
+    if (!t) { toast('请先创建/打开任务'); input.value = ''; return }
+    var files = input.files
+    if (!files || !files.length) return
+    ;[...files].forEach(function (file) {
+      // 占位：避免重复上传同名文件
+      var list = HX_ATTACH[t.id] || (HX_ATTACH[t.id] = [])
+      if (list.some(function (a) { return a.name === file.name })) { toast('已添加过「' + file.name + '」'); return }
+      var placeholder = { name: file.name, text: '', chars: 0, ext: (file.name.split('.').pop() || '').toLowerCase(), loading: true }
+      list.push(placeholder)
+      renderRightPanel()
+      hxExtractFile(file).then(function (d) {
+        Object.assign(placeholder, { text: d.text || '', chars: d.chars || 0, ext: d.ext, loading: false, error: null })
+        toast('已提取「' + file.name + '」(' + (d.chars || 0) + ' 字符)')
+        renderRightPanel()
+      }).catch(function (e) {
+        placeholder.loading = false
+        placeholder.error = String(e && e.message || e)
+        toast('附件失败：' + placeholder.error)
+        renderRightPanel()
+      })
+    })
+    input.value = ''
+  }
+
+  window.hxRemoveAttach = function (taskId, name) {
+    var list = HX_ATTACH[taskId]
+    if (!list) return
+    HX_ATTACH[taskId] = list.filter(function (a) { return a.name !== name })
+    renderRightPanel()
+  }
+
+  function hxActiveAttachments(taskId) {
+    var list = HX_ATTACH[taskId] || []
+    return list.filter(function (a) { return a.text && a.text.trim() && !a.loading && !a.error })
+  }
+
+  function hxRenderAttachments(taskId) {
+    var list = HX_ATTACH[taskId] || []
+    if (!list.length) return ''
+    var html = '<div class="hx-attach-row">'
+    list.forEach(function (a) {
+      if (a.loading) {
+        html += '<div class="hx-attach"><span>⏳</span><span class="name">' + esc(a.name) + '</span><span class="meta">提取中…</span></div>'
+      } else if (a.error) {
+        html += '<div class="hx-attach" style="background:#fff2f0;border-color:#ffd0d0;color:#c33"><span>⚠</span><span class="name">' + esc(a.name) + '</span><span class="x" onclick="hxRemoveAttach(\'' + esc(taskId) + '\',\'' + esc(a.name) + '\')">✕</span></div>'
+      } else {
+        html += '<div class="hx-attach"><span>📄</span><span class="name" title="' + esc(a.name) + '">' + esc(a.name) + '</span><span class="meta">' + (a.chars || 0) + ' 字符</span><span class="x" onclick="hxRemoveAttach(\'' + esc(taskId) + '\',\'' + esc(a.name) + '\')">✕</span></div>'
+      }
+    })
+    html += '</div>'
+    var errs = list.filter(function (a) { return a.error })
+    if (errs.length) html += '<div class="hx-attach-err">' + esc(errs[0].error) + '</div>'
+    return html
+  }
+
   function hxSend(t, text, opts) {
     opts = opts || {}
     if (!t) return Promise.resolve()
@@ -279,10 +371,17 @@
       if (opts.onDone) { try { opts.onDone(aiMsg.text) } catch (e) { console.error(e) } }
     }
 
+    var attachList = hxActiveAttachments(t.id)
+    var payload = { key: t.id, text: text, reset: !!opts.reset, sessionId: t.hxSessionId || null }
+    if (attachList.length) {
+      payload.attachments = attachList.map(function (a) { return { name: a.name, text: a.text } })
+      // 发送后清空已使用的附件，避免重复注入
+      HX_ATTACH[t.id] = []
+    }
     return fetch(API + '/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ key: t.id, text: text, reset: !!opts.reset, sessionId: t.hxSessionId || null }),
+      body: JSON.stringify(payload),
       signal: ctrl.signal,
     }).then(function (r) {
       if (!r.ok || !r.body) throw new Error('后端返回 HTTP ' + r.status)
@@ -389,7 +488,7 @@
     var t = getTask(id)
     if (!inp || !t) return
     var v = inp.value
-    if (!String(v).trim()) return
+    if (!String(v).trim() && !hxActiveAttachments(id).length) return
     inp.value = ''
     hxSend(t, String(v).trim())
   }
@@ -556,11 +655,15 @@
     var ph = t
       ? (hxBusy(t.id) ? '专家正在回复中…' : '输入消息，回车发送给 Hermes · wordpresales')
       : '今天帮你做些什么？请先在左侧选择文档类型并发起新对话'
+    var attachHtml = t ? hxRenderAttachments(t.id) : ''
     return '<div class="qw-input">'
+      + (attachHtml || '')
       + '<input id="chatIn" ' + (active ? '' : 'disabled') + ' placeholder="' + esc(ph) + '" '
       + (active ? 'onkeydown="if(event.key===\'Enter\')sendChat(\'' + t.id + '\')"' : '') + '>'
       + '<div class="qi-bar">'
       + '<span class="qi-ico" title="引用知识库素材" onclick="' + (active ? 'pickKbForAnswer(\'' + t.id + '\')' : 'toast(\'请先创建/打开任务\')') + '">＋</span>'
+      + '<span class="qi-ico" title="上传文件让大模型分析（支持 txt/md/json/csv/docx）" onclick="' + (active ? 'document.getElementById(\'chatAttach\').click()' : 'toast(\'请先创建/打开任务\')') + '">📎</span>'
+      + '<input type="file" id="chatAttach" style="display:none" onchange="hxAttachFile(this)">'
       + '<div style="flex:1"></div>'
       + '<span class="qi-auto" title="由 Hermes Agent(wordpresales) 真实生成">🤖 Hermes · wordpresales</span>'
       + '<button class="qi-send" title="发送" onclick="' + (active ? 'sendChat(\'' + t.id + '\')' : (t && hxBusy(t.id) ? 'hxStop(\'' + t.id + '\')' : 'toast(\'请先创建/打开任务\')')) + '">➤</button>'

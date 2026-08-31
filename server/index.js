@@ -15,11 +15,14 @@ const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
 const { HermesPool } = require('./hermes.js')
+const { extractText } = require('./extract.js')
 
 const PORT = Number(process.env.PORT || 8088)
 const HOST = process.env.BIND_HOST || '0.0.0.0'
 const FRONT_DIR = path.resolve(process.env.FRONT_DIR || path.join(__dirname, '..', 'frontend'))
 const MAX_BODY = 2 * 1024 * 1024
+const MAX_ATTACHMENT = 10 * 1024 * 1024
+const MAX_ATTACH_CHARS = Number(process.env.MAX_ATTACH_CHARS || 30000)
 
 const pool = new HermesPool()
 
@@ -47,13 +50,13 @@ function sendJson(res, code, obj) {
   res.end(body)
 }
 
-function readBody(req) {
+function readBody(req, limit = MAX_BODY) {
   return new Promise((resolve, reject) => {
     let size = 0
     const chunks = []
     req.on('data', (c) => {
       size += c.length
-      if (size > MAX_BODY) { reject(new Error('请求体过大')); req.destroy(); return }
+      if (size > limit) { reject(new Error('请求体过大')); req.destroy(); return }
       chunks.push(c)
     })
     req.on('end', () => {
@@ -136,9 +139,22 @@ async function handleChat(req, res) {
   try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { error: e.message }) }
 
   const key = String(body.key || body.taskId || 'default').slice(0, 64)
-  const text = String(body.text || '').trim()
+  const rawText = String(body.text || '').trim()
+  const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const reset = !!body.reset
   const sessionId = body.sessionId ? String(body.sessionId).slice(0, 64) : null
+  let promptText = rawText
+  if (attachments.length) {
+    const parts = attachments
+      .filter((a) => a && typeof a.text === 'string' && a.text.trim())
+      .map((a) => {
+        let txt = a.text.trim()
+        if (txt.length > MAX_ATTACH_CHARS) txt = txt.slice(0, MAX_ATTACH_CHARS) + '\n\n…（文件内容已截断，后续内容省略）'
+        return `【已上传文件：${a.name || '未命名'}】\n${txt}`
+      })
+    if (parts.length) promptText = parts.join('\n\n---\n\n') + '\n\n---\n\n' + (promptText || '请基于以上文件内容进行分析。')
+  }
+  const text = promptText.trim()
   if (!text) return sendJson(res, 400, { error: 'text 不能为空' })
 
   res.writeHead(200, {
@@ -193,6 +209,35 @@ async function handleChat(req, res) {
   } finally {
     clearInterval(beat)
     if (!closed) { try { res.end() } catch (_) {} }
+  }
+}
+
+/* ---------------- 聊天文件附件：提取文本 ---------------- */
+async function handleExtract(req, res) {
+  let body
+  try { body = await readBody(req, MAX_ATTACHMENT) } catch (e) { return sendJson(res, 400, { error: e.message }) }
+  const name = String(body.name || '').trim()
+  const base64 = String(body.base64 || body.data || '')
+  if (!name) return sendJson(res, 400, { error: '缺少文件名' })
+  if (!base64) return sendJson(res, 400, { error: '缺少文件内容（base64）' })
+  let buf
+  try {
+    buf = Buffer.from(base64, 'base64')
+  } catch (e) {
+    return sendJson(res, 400, { error: 'base64 解码失败' })
+  }
+  if (!buf.length) return sendJson(res, 400, { error: '文件内容为空' })
+  const MAX_MB = 5
+  if (buf.length > MAX_MB * 1024 * 1024) {
+    return sendJson(res, 413, { error: `文件超过 ${MAX_MB}MB 上限，请压缩或粘贴文本` })
+  }
+  try {
+    const out = extractText(name, buf)
+    if (!out.ok) return sendJson(res, 415, { ok: false, error: out.error })
+    return sendJson(res, 200, { ok: true, name: out.name, ext: out.ext, chars: out.chars, text: out.text })
+  } catch (e) {
+    log('提取文件内容失败:', name, e && e.message)
+    return sendJson(res, 500, { ok: false, error: '提取内容失败：' + (e && e.message || e) })
   }
 }
 
@@ -310,7 +355,8 @@ async function handleHealth(req, res) {
 const server = http.createServer(async (req, res) => {
   const url = req.url || '/'
   try {
-    if (url.startsWith('/api/chat') && req.method === 'POST') return void (await handleChat(req, res))
+    if (url === '/api/chat' && req.method === 'POST') return void (await handleChat(req, res))
+    if (url === '/api/chat/extract' && req.method === 'POST') return void (await handleExtract(req, res))
     if (url.startsWith('/api/sessions') && req.method === 'GET') return void (await handleSessions(req, res))
     if (url.startsWith('/api/session/attach') && req.method === 'POST') return void (await handleAttach(req, res))
     if (url.startsWith('/api/health')) return void (await handleHealth(req, res))
