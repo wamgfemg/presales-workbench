@@ -247,28 +247,21 @@
   }
 
   /* ---------------- 文件附件：前端选文件 → BFF 提取文本 ---------------- */
-  function hxFileToBase64(file) {
-    return new Promise(function (resolve, reject) {
-      var r = new FileReader()
-      r.onload = function () { resolve(r.result.split(',')[1]) }
-      r.onerror = function () { reject(new Error('读取文件失败')) }
-      r.readAsDataURL(file)
-    })
-  }
-
   function hxExtractFile(file) {
-    return hxFileToBase64(file).then(function (b64) {
-      return fetch(API + '/api/chat/extract', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: file.name, base64: b64 }),
-      }).then(function (r) {
-        if (!r.ok) {
-          return r.json().then(function (d) { throw new Error(d.error || ('提取失败 HTTP ' + r.status)) })
-            .catch(function () { throw new Error('提取失败 HTTP ' + r.status) })
-        }
-        return r.json()
-      })
+    // 原始二进制直传（避免 base64 膨胀触发代理 413）
+    return fetch(API + '/api/chat/extract', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-filename': encodeURIComponent(file.name),
+      },
+      body: file,
+    }).then(function (r) {
+      if (!r.ok) {
+        return r.json().then(function (d) { throw new Error(d.error || ('提取失败 HTTP ' + r.status)) })
+          .catch(function () { throw new Error('提取失败 HTTP ' + r.status) })
+      }
+      return r.json()
     })
   }
 

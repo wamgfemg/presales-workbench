@@ -213,23 +213,44 @@ async function handleChat(req, res) {
 }
 
 /* ---------------- 聊天文件附件：提取文本 ---------------- */
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let size = 0
+    req.on('data', (c) => {
+      size += c.length
+      if (size > limit) { reject(new Error('请求体过大')); req.destroy(); return }
+      chunks.push(c)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
+
 async function handleExtract(req, res) {
-  let body
-  try { body = await readBody(req, MAX_ATTACHMENT) } catch (e) { return sendJson(res, 400, { error: e.message }) }
-  const name = String(body.name || '').trim()
-  const base64 = String(body.base64 || body.data || '')
-  if (!name) return sendJson(res, 400, { error: '缺少文件名' })
-  if (!base64) return sendJson(res, 400, { error: '缺少文件内容（base64）' })
+  const ct = String(req.headers['content-type'] || '')
+  let name = ''
   let buf
   try {
-    buf = Buffer.from(base64, 'base64')
+    if (ct.includes('application/octet-stream')) {
+      // 原始二进制直传（省去 base64 的 33% 膨胀，缓解代理 413）
+      name = decodeURIComponent(String(req.headers['x-filename'] || '').trim())
+      buf = await readRaw(req, MAX_ATTACHMENT)
+    } else {
+      const body = await readBody(req, MAX_ATTACHMENT)
+      name = String(body.name || '').trim()
+      const base64 = String(body.base64 || body.data || '')
+      if (!base64) return sendJson(res, 400, { error: '缺少文件内容' })
+      buf = Buffer.from(base64, 'base64')
+    }
   } catch (e) {
-    return sendJson(res, 400, { error: 'base64 解码失败' })
+    return sendJson(res, 413, { error: '上传被拦截或文件过大：' + e.message + '。建议压缩文件、转成 .docx 后重试，或直接把文本粘贴到输入框。' })
   }
-  if (!buf.length) return sendJson(res, 400, { error: '文件内容为空' })
-  const MAX_MB = 5
+  if (!name) return sendJson(res, 400, { error: '缺少文件名' })
+  if (!buf || !buf.length) return sendJson(res, 400, { error: '文件内容为空' })
+  const MAX_MB = 8
   if (buf.length > MAX_MB * 1024 * 1024) {
-    return sendJson(res, 413, { error: `文件超过 ${MAX_MB}MB 上限，请压缩或粘贴文本` })
+    return sendJson(res, 413, { error: `文件超过 ${MAX_MB}MB 上限。请压缩后重试，或把正文文本直接粘贴到输入框交给 Hermes 分析。` })
   }
   try {
     const out = extractText(name, buf)

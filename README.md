@@ -116,7 +116,19 @@ curl -s http://127.0.0.1:8088/api/health     # 健康检查（含 BFF 内存、�
 systemctl restart presales-workbench         # 重启
 ```
 
-## 七、已知边界
+## 七、方案交互中心 · 文件上传分析
+
+「方案制作中心」对话输入框的📎回形针按钮，可把本地文件直接发给 Hermes 分析（自动提取文本拼入 prompt）。
+
+- **支持格式**：`txt / md / json / csv / docx / doc`
+- **旧版 `.doc`（OLE2/CFB 复合文档，Word 97 格式）**：`server/extract.js` 内置纯 JS 的 CFB 解析器（`class CFB`）+ `extractDoc()`，兼容正文为「`WordDocument` 流中 `fcMin` 起连续 UTF-16LE 块」的老格式（本项目实测中信银行信创升级采购文件即此格式，提取 35000+ 中文字符）。
+- **传输方式**：前端改为**原始二进制直传**（`application/octet-stream` + `x-filename` 头），不再 base64，省去 33% 体积膨胀，缓解代理对 POST 体大小的 413 拦截。
+- **大小上限**：单文件 8MB（超过返回友好提示，建议压缩 / 转 docx / 直接粘贴文本）。
+- **不支持的格式**：返回 415 并提示具体原因。
+
+接口：`POST /api/chat/extract`，浏览器或任意 HTTP 客户端均可调用（兼容旧 JSON `{name, base64}` 入参）。
+
+## 八、已知边界
 
 - 业务数据（项目、知识库、C139）存在**浏览器 localStorage**，换浏览器不同步；侧边栏可导出/导入 JSON 备份。需要多人共享时再加后端存储。
 - Hermes 重启会使 WS 会话失效，BFF 会自动重建并重试一次，用户侧只会看到「会话已失效，正在重建…」。
