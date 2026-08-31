@@ -98,8 +98,6 @@
           <div class="searchbar">
             <input id="kbSearch" placeholder="🔍 关键词检索（多词空格分隔）" oninput="renderKb()">
             <div style="flex:1"></div>
-            <button class="btn sm ghost" onclick="openKbModal()">＋ 新增知识</button>
-            <label class="btn sm ghost" style="cursor:pointer">📄 快速上传文本文件<input type="file" id="kbUpload" multiple style="display:none" onchange="kbUploadFiles(this)"></label>
           </div>
           <div class="hint" id="kbCrumb"></div>
           <div id="kbList"></div>
@@ -171,18 +169,6 @@
   <button class="btn" style="margin-left:10px" onclick="saveProject()">保存</button></div>
 </div></div>
 
-<!-- 知识库条目弹窗 -->
-<div class="mask" id="mKb"><div class="modal">
-  <h3><span id="kbTitle">新增知识</span><button class="x" onclick="closeMask('mKb')">✕</button></h3>
-  <div class="grid g2">
-    <label class="f"><span>标题 *</span><input id="kfName"></label>
-    <label class="f"><span>所属目录</span><select id="kfCat"></select></label>
-  </div>
-  <label class="f"><span>标签（逗号分隔，便于检索）</span><input id="kfTags" placeholder="如：智慧城市,政务,标杆案例"></label>
-  <label class="f"><span>内容 *</span><textarea id="kfBody" rows="8"></textarea></label>
-  <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mKb')">取消</button>
-  <button class="btn" style="margin-left:10px" onclick="saveKb()">保存</button></div>
-</div></div>
 
 <!-- 素材插入弹窗 -->
 <div class="mask" id="mInsert"><div class="modal">

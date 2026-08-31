@@ -31,6 +31,35 @@ const INTERNAL_TYPES = new Set([
   'reasoning.available', 'session.usage', 'message.start',
 ])
 
+/* ---------------- 登录 Cookie 缓存（避免每次对话都重新 password-login 触发 Hermes 限流） ---------------- */
+const COOKIE_TTL_MS = Number(process.env.HERMES_COOKIE_TTL_MS || 30 * 60 * 1000)
+let _cookieCache = null
+async function _loginRaw(cfg) {
+  const r = await fetch(`${cfg.url}/auth/password-login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: cfg.user, password: cfg.pass, provider: 'basic' }),
+  })
+  if (!r.ok) throw new Error(`Hermes 登录失败 HTTP ${r.status}`)
+  let list = []
+  if (typeof r.headers.getSetCookie === 'function') list = r.headers.getSetCookie()
+  if (!list || !list.length) {
+    const one = r.headers.get('set-cookie')
+    list = one ? [one] : []
+  }
+  const cookie = list.map((s) => String(s).split(';')[0]).filter(Boolean).join('; ')
+  if (!cookie) throw new Error('Hermes 登录未返回 Cookie')
+  return cookie
+}
+async function hermesCookieCached() {
+  if (_cookieCache && _cookieCache.expires > Date.now()) return _cookieCache.value
+  const c = await _loginRaw(DEFAULTS)
+  _cookieCache = { value: c, expires: Date.now() + COOKIE_TTL_MS }
+  return c
+}
+function invalidateCookieCache() { _cookieCache = null }
+
+
 class HermesSession {
   constructor(opts = {}) {
     this.cfg = { ...DEFAULTS, ...opts }
@@ -48,29 +77,19 @@ class HermesSession {
 
   get connected() { return !!(this.ws && this.sessionId && this.ws.readyState === 1) }
 
-  /* ---------------- HTTP 鉴权 ---------------- */
+  /* ---------------- HTTP 鉴权（复用缓存的 Cookie，减少 Hermes 登录压力） ---------------- */
   async _cookie() {
-    const r = await fetch(`${this.cfg.url}/auth/password-login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: this.cfg.user, password: this.cfg.pass, provider: 'basic' }),
-    })
-    if (!r.ok) throw new Error(`Hermes 登录失败 HTTP ${r.status}`)
-    let list = []
-    if (typeof r.headers.getSetCookie === 'function') list = r.headers.getSetCookie()
-    if (!list || !list.length) {
-      const one = r.headers.get('set-cookie')
-      list = one ? [one] : []
-    }
-    const cookie = list.map((s) => String(s).split(';')[0]).filter(Boolean).join('; ')
-    if (!cookie) throw new Error('Hermes 登录未返回 Cookie')
-    return cookie
+    return hermesCookieCached()
   }
 
   async _ticket(cookie) {
     // 注意：必须用 POST，GET 会 404
     const r = await fetch(`${this.cfg.url}/api/auth/ws-ticket`, { method: 'POST', headers: { cookie } })
-    if (!r.ok) throw new Error(`获取 ws-ticket 失败 HTTP ${r.status}`)
+    if (!r.ok) {
+      // Cookie 失效（401）时清缓存，下次 open 会自动重新登录
+      if (r.status === 401) invalidateCookieCache()
+      throw new Error(`获取 ws-ticket 失败 HTTP ${r.status}`)
+    }
     const d = await r.json()
     if (!d || !d.ticket) throw new Error('ws-ticket 响应缺少 ticket')
     return d.ticket
@@ -356,8 +375,13 @@ class HermesPool {
       const raw = fs.readFileSync(p, 'utf8')
       const arr = JSON.parse(raw)
       if (Array.isArray(arr)) {
+        const now = Date.now()
+        const RETAIN = Number(process.env.SESSION_MAP_RETAIN_MS || 30 * 24 * 60 * 60 * 1000)
         for (const it of arr) {
-          if (it && it.shortId) this.sessionMap.set(it.shortId, it)
+          if (!it || !it.shortId) continue
+          // 丢弃超期条目，避免 session-map 只增不减、无限膨胀
+          if (it.createdAt && now - it.createdAt > RETAIN) continue
+          this.sessionMap.set(it.shortId, it)
         }
       }
     } catch (e) {
@@ -370,7 +394,13 @@ class HermesPool {
       const fs = require('node:fs')
       const p = this._mapPath()
       fs.mkdirSync(require('node:path').dirname(p), { recursive: true })
-      fs.writeFileSync(p, JSON.stringify([...this.sessionMap.values()], null, 2), 'utf8')
+      let vals = [...this.sessionMap.values()]
+      // 超过上限时只保留最近使用的，防止文件无限增大
+      const MAX = Number(process.env.SESSION_MAP_MAX || 2000)
+      if (vals.length > MAX) {
+        vals = vals.sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0)).slice(0, MAX)
+      }
+      fs.writeFileSync(p, JSON.stringify(vals, null, 2), 'utf8')
     } catch (e) {
       console.error('保存 session-map 失败:', e && e.message)
     }
@@ -469,4 +499,4 @@ class HermesPool {
   }
 }
 
-module.exports = { HermesSession, HermesPool, DEFAULTS }
+module.exports = { HermesSession, HermesPool, DEFAULTS, hermesCookieCached, invalidateCookieCache }

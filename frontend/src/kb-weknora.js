@@ -2,9 +2,36 @@
 let WEK = { enabled: null, base: null, items: [], loading: false, error: '', loadedAt: 0 }
 
 /* 目录归属映射：WeKnora 文档本身不带目录，目录是前端本地组织层。
-   键=文档 id，值=目录节点 id（null/缺失 = 未归类，仅出现在「全部知识」）。 */
+   键=文档 id，值=目录节点 id（null/缺失 = 未归类，仅出现在「全部知识」）。
+   归属后端持久化（/api/weknora/doc-category），localStorage 仅作离线回退，保证跨浏览器/跨设备一致。 */
 let WEK_CATM = {}
-try { WEK_CATM = JSON.parse(localStorage.getItem('weknora_catmap') || '{}') || {} } catch (e) { WEK_CATM = {} }
+let _catMapLoaded = false
+
+async function loadCatMap() {
+  try {
+    const r = await fetch('/api/weknora/doc-category')
+    if (r.ok) {
+      const d = await r.json()
+      if (d && d.map) { WEK_CATM = d.map || {}; _catMapLoaded = true; try { localStorage.setItem('weknora_catmap', JSON.stringify(WEK_CATM)) } catch (e) {}; return }
+    }
+  } catch (e) { /* 后端不可用，回退本地 */ }
+  try { WEK_CATM = JSON.parse(localStorage.getItem('weknora_catmap') || '{}') || {} } catch (e) { WEK_CATM = {} }
+  _catMapLoaded = true
+}
+
+function setDocCat(docId, catId) {
+  if (catId) WEK_CATM[docId] = catId
+  else delete WEK_CATM[docId]
+  try { localStorage.setItem('weknora_catmap', JSON.stringify(WEK_CATM)) } catch (e) {}
+  // 后端持久化（失败静默；localStorage 已兜底，恢复后下次写入补齐）
+  try {
+    fetch('/api/weknora/doc-category', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ docId, catId: catId || null }),
+    }).catch(() => {})
+  } catch (e) {}
+}
+
 function saveCatMap() { try { localStorage.setItem('weknora_catmap', JSON.stringify(WEK_CATM)) } catch (e) {} }
 function catOfDoc(it) { return WEK.enabled ? (WEK_CATM[it.id] || null) : ((store.kb.find(k => k.id === it.id) || {}).catId || null) }
 function docsInCat(nodeId) {
@@ -27,6 +54,7 @@ async function loadWeKnoraKb(force) {
   WEK.loading = true
   WEK.error = ''
   try {
+    await loadCatMap() // 先拉取目录归属（后端优先，失败回退本地），保证跨设备一致
     const [baseRes, listRes] = await Promise.all([
       fetch('/api/weknora/knowledge-base'),
       fetch('/api/weknora/knowledge?page=1&page_size=100')
@@ -66,7 +94,7 @@ function renderKb() {
   const kw = (document.getElementById('kbSearch').value || '').toLowerCase().split(/\s+/).filter(Boolean)
   // 先按左侧选中的目录过滤（全部知识 = 不过滤；具体目录 = 仅该目录及子目录归属的文档）
   let list = docsInCat(kbSelCat).slice()
-  if (kw.length) list = list.filter(it => kw.some(w => ((it.title || '') + ' ' + (it.description || '')).toLowerCase().includes(w)))
+  if (kw.length) list = list.filter(it => kw.some(w => ((it.title || '') + ' ' + (it.description || '') + ' ' + (it.file_name || '') + ' ' + (it.content || '')).toLowerCase().includes(w)))
 
   if (!list.length) {
     if (WEK.enabled && kbSelCat !== 'all' && !kw.length) {
@@ -92,7 +120,7 @@ function renderKb() {
         ${statusTag}
         <span class="tag">${it.enable_status === 'enabled' ? '已启用' : '未启用'}</span>
         <div style="flex:1"></div>
-        <select class="kb-cat-sel" title="归类到目录" onchange="WEK_CATM['${it.id}']=this.value||null;saveCatMap();renderKb()">
+        <select class="kb-cat-sel" title="归类到目录" onchange="setDocCat('${it.id}',this.value||null);renderKb()">
           <option value="">全部知识（未归类）</option>
           ${store.kbTree.map(n => { let d = 0, p = n.pid; while (p) { d++; const q = store.kbTree.find(x => x.id === p); p = q ? q.pid : null } return `<option value="${n.id}" ${(WEK_CATM[it.id] || '') === n.id ? 'selected' : ''}>${'　'.repeat(d)}${esc(n.name)}</option>` }).join('')}
         </select>
@@ -129,7 +157,8 @@ function delCatNode(id) {
   if (!n) return
   if (!confirm('删除目录「' + n.name + '」？\n子目录上提一层，目录内知识移至上级')) return
   const ids = descIds(id)
-  Object.keys(WEK_CATM).forEach(k => { if (ids.indexOf(WEK_CATM[k]) >= 0) delete WEK_CATM[k] })
+  // 清除该目录及子目录下文档的归属，并同步后端（setDocCat 会 PUT 后端 + 写 localStorage）
+  Object.keys(WEK_CATM).filter(k => ids.indexOf(WEK_CATM[k]) >= 0).forEach(k => setDocCat(k, null))
   saveCatMap()
   childrenOf(id).forEach(k => k.pid = n.pid)
   store.kb.forEach(k => { if (k.catId === id) k.catId = n.pid || null })
@@ -354,7 +383,7 @@ async function wzUploadAll() {
       f.p = 100
       // 抓取新建文档 id，归入所选目录（WeKnora 文档本身无目录概念，目录为前端本地归属）
       const newId = (data && data.data && (data.data.id || data.data.knowledge_id)) || (data && data.id) || null
-      if (newId) { WEK_CATM[newId] = wz.catId || null; saveCatMap() }
+      if (newId) { setDocCat(newId, wz.catId || null) }
       wz.uploadResults.push({ name: f.name, ok: data.success === true, error: data.success === true ? '' : (data.error && data.error.message || data.message || '上传失败') })
     } catch (e) {
       f.p = 100

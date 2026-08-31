@@ -14,7 +14,7 @@ const http = require('node:http')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
-const { HermesPool } = require('./hermes.js')
+const { HermesPool, hermesCookieCached, invalidateCookieCache } = require('./hermes.js')
 const { extractText } = require('./extract.js')
 
 const PORT = Number(process.env.PORT || 8088)
@@ -22,7 +22,21 @@ const HOST = process.env.BIND_HOST || '0.0.0.0'
 const FRONT_DIR = path.resolve(process.env.FRONT_DIR || path.join(__dirname, '..', 'frontend'))
 const MAX_BODY = 2 * 1024 * 1024
 const MAX_ATTACHMENT = 10 * 1024 * 1024
-const MAX_ATTACH_CHARS = Number(process.env.MAX_ATTACH_CHARS || 30000)
+// 单文件提取文本送入模型的最大字符数：默认 80000，覆盖常见标书/采购文件全文（如 3.5 万字 doc）。
+// 仍保留截断提示，避免超大文档撑爆模型上下文；可用环境变量调大。
+const MAX_ATTACH_CHARS = Number(process.env.MAX_ATTACH_CHARS || 80000)
+const HEALTH_TTL_MS = Number(process.env.HEALTH_TTL_MS || 15000)
+const WEKNORA_TIMEOUT_MS = Number(process.env.WEKNORA_TIMEOUT_MS || 30000)
+const HERMES_TIMEOUT_MS = Number(process.env.HERMES_TIMEOUT_MS || 20000)
+const DATA_DIR = process.env.DATA_DIR || '/opt/presales-workbench/data'
+
+let _healthCache = { at: 0, data: null }
+
+function fetchWithTimeout(url, opts = {}, ms = HERMES_TIMEOUT_MS) {
+  const ac = new AbortController()
+  const t = setTimeout(() => ac.abort(), ms)
+  return fetch(url, { ...opts, signal: ac.signal }).finally(() => clearTimeout(t))
+}
 
 const pool = new HermesPool()
 
@@ -100,34 +114,16 @@ async function serveStatic(req, res, urlPath) {
   fs.createReadStream(full).pipe(res)
 }
 
-/* ---------------- Hermes 通用：拿会话列表 ---------------- */
-async function hermesCookie() {
-  const url = process.env.HERMES_URL || 'http://127.0.0.1:9119'
-  const user = process.env.HERMES_USER || 'admin'
-  const pass = process.env.HERMES_PASS || ''
-  const r = await fetch(`${url}/auth/password-login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: user, password: pass, provider: 'basic' }),
-  })
-  if (!r.ok) throw new Error(`Hermes 登录失败 HTTP ${r.status}`)
-  let list = []
-  if (typeof r.headers.getSetCookie === 'function') list = r.headers.getSetCookie()
-  if (!list || !list.length) {
-    const one = r.headers.get('set-cookie')
-    list = one ? [one] : []
-  }
-  const cookie = list.map((s) => String(s).split(';')[0]).filter(Boolean).join('; ')
-  if (!cookie) throw new Error('Hermes 登录未返回 Cookie')
-  return cookie
-}
-
+/* ---------------- Hermes 通用：拿会话列表（复用 hermes.js 的登录 Cookie 缓存） ---------------- */
 async function hermesSessions() {
   const url = process.env.HERMES_URL || 'http://127.0.0.1:9119'
   const profile = process.env.HERMES_PROFILE || 'wordpresales'
-  const cookie = await hermesCookie()
-  const r = await fetch(`${url}/api/sessions`, { headers: { cookie } })
-  if (!r.ok) throw new Error(`Hermes /api/sessions 失败 HTTP ${r.status}`)
+  const cookie = await hermesCookieCached()
+  const r = await fetchWithTimeout(`${url}/api/sessions`, { headers: { cookie } }, HERMES_TIMEOUT_MS)
+  if (!r.ok) {
+    if (r.status === 401) invalidateCookieCache() // Cookie 失效，下次自动重登
+    throw new Error(`Hermes /api/sessions 失败 HTTP ${r.status}`)
+  }
   const data = await r.json()
   const sessions = (data.sessions || []).filter((s) => s.profile === profile)
   return sessions
@@ -327,6 +323,7 @@ function proxyToWeKnora(req, res, targetPath, search) {
     path: `/api/v1${targetPath}${qs}`,
     method: req.method,
     headers: { ...req.headers, 'x-api-key': WEKNORA_API_KEY },
+    timeout: WEKNORA_TIMEOUT_MS, // 防止 WeKnora 卡死时 BFF 连接挂起、socket 泄漏
   }
   delete options.headers.host
   delete options.headers.connection
@@ -336,6 +333,10 @@ function proxyToWeKnora(req, res, targetPath, search) {
     res.writeHead(proxyRes.statusCode, proxyRes.headers)
     proxyRes.pipe(res)
   })
+  proxyReq.on('timeout', () => {
+    log('WeKnora 代理超时')
+    proxyReq.destroy(new Error('WeKnora 请求超时'))
+  })
   proxyReq.on('error', (err) => {
     log('WeKnora 代理失败:', err && err.message)
     if (!res.headersSent) sendJson(res, 502, { error: 'WeKnora 代理失败: ' + (err && err.message) })
@@ -344,8 +345,38 @@ function proxyToWeKnora(req, res, targetPath, search) {
   req.pipe(proxyReq)
 }
 
-/* ---------------- 健康检查 ---------------- */
+/* ---------------- 文档目录归属映射（后端持久化，跨浏览器/跨设备一致） ----------------
+   键=文档 id，值=目录节点 id（缺失/null = 未归类，仅出现在「全部知识」）。
+   WeKnora 文档本身不带目录，目录是前端组织层；此前存浏览器 localStorage 会跨设备不同步，
+   现下沉到服务端文件，前端读写此接口即可保持一致。 */
+const CATMAP_FILE = path.join(DATA_DIR, 'kb-catmap.json')
+let _catMap = (() => { try { return JSON.parse(fs.readFileSync(CATMAP_FILE, 'utf8') || '{}') || {} } catch (_) { return {} } })()
+function saveCatMap() {
+  try {
+    fs.mkdirSync(path.dirname(CATMAP_FILE), { recursive: true })
+    fs.writeFileSync(CATMAP_FILE, JSON.stringify(_catMap), 'utf8')
+  } catch (e) { log('保存 kb-catmap 失败:', e && e.message) }
+}
+async function handleCatMapGet(req, res) {
+  return sendJson(res, 200, { ok: true, map: _catMap })
+}
+async function handleCatMapPut(req, res) {
+  let body
+  try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { error: e.message }) }
+  const docId = String(body.docId || '').trim()
+  if (!docId) return sendJson(res, 400, { error: 'docId 必填' })
+  const catId = body.catId ? String(body.catId).trim() : null
+  if (catId) _catMap[docId] = catId
+  else delete _catMap[docId]
+  saveCatMap()
+  return sendJson(res, 200, { ok: true, docId, catId })
+}
+
+/* ---------------- 健康检查（带 TTL 缓存，避免前端每 60s 轮询都打外部依赖） ---------------- */
 async function handleHealth(req, res) {
+  if (Date.now() - _healthCache.at < HEALTH_TTL_MS && _healthCache.data) {
+    return sendJson(res, 200, { ..._healthCache.data, cached: true })
+  }
   const out = {
     ok: true,
     time: new Date().toISOString(),
@@ -360,15 +391,16 @@ async function handleHealth(req, res) {
     node: process.version,
   }
   try {
-    const r = await fetch(out.hermesUrl + '/', { method: 'GET' })
+    const r = await fetchWithTimeout(out.hermesUrl + '/', { method: 'GET' }, HERMES_TIMEOUT_MS)
     out.hermesReachable = r.status
   } catch (e) { out.hermesReachable = 'unreachable: ' + (e && e.message) }
   if (WEKNORA_ENABLED) {
     try {
-      const r = await fetch(`${WEKNORA_URL}/api/v1/knowledge-bases/${WEKNORA_KB_ID}`, { headers: { 'x-api-key': WEKNORA_API_KEY } })
+      const r = await fetchWithTimeout(`${WEKNORA_URL}/api/v1/knowledge-bases/${WEKNORA_KB_ID}`, { headers: { 'x-api-key': WEKNORA_API_KEY } }, WEKNORA_TIMEOUT_MS)
       out.weknoraReachable = r.status
     } catch (e) { out.weknoraReachable = 'unreachable: ' + (e && e.message) }
   }
+  _healthCache = { at: Date.now(), data: out }
   sendJson(res, 200, out)
 }
 
@@ -397,6 +429,12 @@ const server = http.createServer(async (req, res) => {
       const itemId = decodeURIComponent(url.slice('/api/weknora/knowledge/'.length).split('?')[0])
       if (!itemId) return sendJson(res, 400, { error: '缺少文档 ID' })
       return proxyToWeKnora(req, res, `/knowledge/${itemId}`)
+    }
+    if (url.startsWith('/api/weknora/doc-category') && req.method === 'GET') {
+      return void (await handleCatMapGet(req, res))
+    }
+    if (url.startsWith('/api/weknora/doc-category') && req.method === 'PUT') {
+      return void (await handleCatMapPut(req, res))
     }
 
     if (url.startsWith('/api/reset') && req.method === 'POST') {
