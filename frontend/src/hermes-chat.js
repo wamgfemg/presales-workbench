@@ -257,12 +257,18 @@
     HX_CTRL[t.id] = ctrl
     var acc = ''
 
+    // provider 慢/过载时的友好提示：首条消息后若 22s 仍无正文，给出明确反馈，避免"卡死"错觉
+    var slowTimer = setTimeout(function () {
+      if (!acc) hxSetStatus('模型响应较慢：provider 可能繁忙或过载，请稍候，系统会在恢复后继续…')
+    }, 22000)
+
     function paint() {
       var live = document.getElementById('hxLive')
       if (live) { live.textContent = acc; hxScroll() }
     }
 
     function finish(finalText, errMsg) {
+      clearTimeout(slowTimer)
       aiMsg.text = finalText || acc || ''
       delete aiMsg.streaming
       delete HX_CTRL[t.id]
@@ -298,7 +304,7 @@
               if (!payload) return
               var ev
               try { ev = JSON.parse(payload) } catch (e) { return }
-              if (ev.type === 'delta') { acc += ev.text || ''; aiMsg.text = acc; hxSetStatus(''); paint() }
+              if (ev.type === 'delta') { acc += ev.text || ''; aiMsg.text = acc; clearTimeout(slowTimer); hxSetStatus(''); paint() }
               else if (ev.type === 'status') hxSetStatus(ev.text || '')
               else if (ev.type === 'session') {
                 hxSaveSession(t, ev)

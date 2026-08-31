@@ -239,7 +239,19 @@ class HermesSession {
     if (t === 'thinking.delta' || t === 'reasoning.delta') {
       if (!turn.thinkingNotified) {
         turn.thinkingNotified = true
+        turn.lastSlowHint = 0
         turn.emit({ type: 'status', text: '专家正在思考…' })
+      } else {
+        // Hermes 会在 provider 慢/过载时周期性发 thinking.delta 告警（如"30s with no output yet"）。
+        // 这类信号对前端很有用，转发为用户友好的"模型响应较慢"提示（节流 20s，避免刷屏）。
+        var pt = String(payload.text || '').toLowerCase()
+        if (/slow|overload|no output|waiting|timeout|繁忙|无输出|响应慢|重试|reconnect/.test(pt)) {
+          var now = Date.now()
+          if (!turn.lastSlowHint || now - turn.lastSlowHint > 20000) {
+            turn.lastSlowHint = now
+            turn.emit({ type: 'status', text: '模型响应较慢：provider 可能繁忙或过载，请稍候，系统会在恢复后继续…' })
+          }
+        }
       }
       return
     }
