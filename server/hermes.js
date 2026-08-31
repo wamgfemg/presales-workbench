@@ -366,6 +366,14 @@ class HermesPool {
 
   get(key, preferredSessionId) {
     let s = this.map.get(key)
+    // 若调用方没指定 sessionId，但本地 sessionMap 已有该 key 的绑定，则自动恢复旧 session
+    if (!preferredSessionId) {
+      let latest = null
+      for (const it of this.sessionMap.values()) {
+        if (it.key === key && (!latest || it.lastUsed > latest.lastUsed)) latest = it
+      }
+      if (latest) preferredSessionId = latest.shortId
+    }
     const needCreate = !s || (preferredSessionId && s.sessionId !== preferredSessionId)
     if (needCreate) {
       // 如果 key 已经绑定别的 session，先 drop 掉
