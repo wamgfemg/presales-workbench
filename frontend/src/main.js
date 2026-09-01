@@ -1,15 +1,22 @@
 
 /* ================= 数据层 ================= */
 const LS_KEY='presales_workbench_v1';
-let store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{}};
+let store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
+  stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{}};
 let editingProjectId=null, currentProjectId=null, kbEditingId=null;
 
 const DEF_CATS=['产品资料','案例库','技术方案素材','公司资质与实力','竞品情报','话术与FAQ','模板与规范'];
 function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify(store))}catch(e){}}
 function load(){try{const s=localStorage.getItem(LS_KEY);if(s)store=JSON.parse(s)}catch(e){}
-  if(!store.projects)store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{}};
+  if(!store.projects)store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
+    stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{}};
   if(!store.tasks)store.tasks=[];if(!store.docs)store.docs=[];if(!store.checklists)store.checklists={};
   if(!store.pdocs)store.pdocs={};
+  if(!store.stakeholders)store.stakeholders={};
+  if(!store.contracts)store.contracts={};
+  if(!store.quotations)store.quotations={};
+  if(!store.compintel)store.compintel=[];
+  if(!store.requirements)store.requirements={};
   if(!store.kbTree||!store.kbTree.length){
     store.kbTree=DEF_CATS.map(n=>({id:uid(),name:n,pid:null}));
     store.kb.forEach(k=>{if(k.category!==undefined){const n=store.kbTree.find(t=>t.name===k.category);k.catId=n?n.id:null;delete k.category}});
@@ -68,6 +75,11 @@ function show(p){
   if(p==='docs')renderDocsPage();
   if(p==='c139')renderC139();
   if(p==='tools')renderTools();
+  if(p==='stakeholders')renderStakeholders();
+  if(p==='contracts')renderContracts();
+  if(p==='quotations')renderQuotations();
+  if(p==='compintel')renderCompintel();
+  if(p==='requirements')renderRequirements();
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-p]');if(b)show(b.dataset.p)});
 function closeMask(id){document.getElementById(id).classList.remove('on')}
@@ -138,8 +150,8 @@ function renderDetail(){
     return `<div class="step ${cls}"><div class="dot">${i<ci?'✓':i+1}</div>${st}</div>`}).join('')+
     (p.stage==='已流标'||p.stage==='已输标'?`<div class="step cur"><div class="dot" style="background:${p.stage==='已中标'?'var(--ok)':'var(--bad)'};color:#fff">✕</div>${p.stage}</div>`:'');
   document.querySelectorAll('#dtTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===dtTab));
-  document.getElementById('dtBody').innerHTML=({renderDtInfo,renderDtTask,renderDtTl,renderDtC139,renderDtDoc})[
-    {info:'renderDtInfo',task:'renderDtTask',tl:'renderDtTl',c:'renderDtC139',doc:'renderDtDoc'}[dtTab]](p);
+  document.getElementById('dtBody').innerHTML=({renderDtInfo,renderDtTask,renderDtTl,renderDtC139,renderDtDoc,renderDtStk,renderDtContract})[
+    {info:'renderDtInfo',task:'renderDtTask',tl:'renderDtTl',c:'renderDtC139',doc:'renderDtDoc',stk:'renderDtStk',contract:'renderDtContract'}[dtTab]](p);
 }
 document.getElementById('dtTabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b){dtTab=b.dataset.t;renderDetail()}});
 
@@ -867,6 +879,413 @@ function renderDash(){
 function exportAll(){download('售前工作台数据备份-'+today()+'.json',JSON.stringify(store,null,2),'application/json');toast('已导出备份文件')}
 function importAll(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{store=JSON.parse(r.result);persist();show('dash');toast('导入成功')}catch(e){toast('文件格式错误')}};r.readAsText(f);inp.value=''}
 
+/* ================= 通用页面项目选择器 ================= */
+function projSelectHtml(id,onchange,opts={}){
+  const cur=document.getElementById(id)?document.getElementById(id).value:(opts.value||currentProjectId||'');
+  return `<select id="${id}" onchange="${onchange}" style="${opts.style||'width:260px'}">
+    ${opts.empty?'<option value="">'+opts.empty+'</option>':''}
+    ${store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('')}
+  </select>`;
+}
+function fillProjSelect(id,value=''){
+  const el=document.getElementById(id);if(!el)return;
+  el.innerHTML='<option value="">— 请选择项目 —</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('');
+  if(value&&store.projects.some(p=>p.id===value))el.value=value;
+  else if(currentProjectId&&store.projects.some(p=>p.id===currentProjectId))el.value=currentProjectId;
+}
+
+/* ================= 干系人管理 ================= */
+function renderStakeholders(){
+  const el=document.getElementById('stkBody');
+  fillProjSelect('stkProj',currentProjectId);
+  const pid=document.getElementById('stkProj').value;
+  const p=getProj(pid);
+  if(!p){el.innerHTML='<div class="card"><div class="empty">暂无项目，请先在「项目管理」中创建</div></div>';return}
+  const list=store.stakeholders[pid]||[];
+  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div><h3 style="margin:0">${esc(p.name)} 干系人</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 共 ${list.length} 人</div></div>
+    <button class="btn" onclick="openStakeholderModal()">＋ 新增干系人</button></div>`;
+  if(!list.length){h+='<div class="empty">暂无干系人，点击右上角新增</div></div>';el.innerHTML=h;return}
+  h+=`<table><tr><th>姓名</th><th>角色</th><th>部门/职务</th><th>影响力</th><th>态度</th><th>关注重点</th><th style="width:140px">操作</th></tr>`+
+  list.map((s,i)=>`<tr>
+    <td><b>${esc(s.name||'—')}</b></td>
+    <td>${esc(s.role||'—')}</td>
+    <td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
+    <td>${influenceBadge(s.influence)}</td>
+    <td>${attitudeBadge(s.attitude)}</td>
+    <td style="max-width:240px">${esc(s.focus||'')}</td>
+    <td><button class="btn sm ghost" onclick="openStakeholderModal('${s.id}')">编辑</button> <button class="btn sm danger" onclick="delStakeholder('${s.id}')">删除</button></td>
+  </tr>`).join('')+'</table></div>';
+  h+=`<div class="card"><h3>干系人地图速览</h3><div class="grid g4">`+
+    ['高','中','低'].map(inf=>{
+      const cnt=list.filter(s=>s.influence===inf).length;
+      return `<div style="background:#f8fafd;border-radius:10px;padding:12px"><div style="font-size:12px;color:var(--sub)">影响力 ${inf}</div><div style="font-size:22px;font-weight:800">${cnt}</div></div>`
+    }).join('')+`</div></div>`;
+  el.innerHTML=h;
+}
+function influenceBadge(v){return v==='high'?'<span class="tag" style="background:#fde8ef;color:var(--bad)">高</span>':v==='low'?'<span class="tag" style="background:#e6f4ea;color:var(--ok)">低</span>':'<span class="tag">中</span>'}
+function attitudeBadge(v){return v==='support'?'<span class="tag" style="background:#e6f4ea;color:var(--ok)">支持</span>':v==='oppose'?'<span class="tag" style="background:#fde8ef;color:var(--bad)">反对</span>':'<span class="tag">中立</span>'}
+function openStakeholderModal(id){
+  const pid=document.getElementById('stkProj').value;
+  const s=id?(store.stakeholders[pid]||[]).find(x=>x.id===id):null;
+  document.getElementById('stkModalTitle').textContent=s?'编辑干系人':'新增干系人';
+  document.getElementById('stkId').value=s?s.id:'';
+  document.getElementById('stkName').value=s?s.name:'';
+  document.getElementById('stkTitle').value=s?s.title:'';
+  document.getElementById('stkDept').value=s?s.dept:'';
+  document.getElementById('stkRole').value=s?s.role:'';
+  document.getElementById('stkInfluence').value=s?s.influence:'medium';
+  document.getElementById('stkAttitude').value=s?s.attitude:'neutral';
+  document.getElementById('stkPhone').value=s?s.phone:'';
+  document.getElementById('stkEmail').value=s?s.email:'';
+  document.getElementById('stkFocus').value=s?s.focus:'';
+  document.getElementById('stkNotes').value=s?s.notes:'';
+  openMask('mStakeholder');
+}
+function saveStakeholder(){
+  const pid=document.getElementById('stkProj').value;if(!pid)return;
+  const name=document.getElementById('stkName').value.trim();
+  if(!name){toast('请填写姓名');return}
+  store.stakeholders[pid]=store.stakeholders[pid]||[];
+  const id=document.getElementById('stkId').value;
+  const data={
+    id:id||uid(),name,title:document.getElementById('stkTitle').value.trim(),
+    dept:document.getElementById('stkDept').value.trim(),role:document.getElementById('stkRole').value,
+    influence:document.getElementById('stkInfluence').value,attitude:document.getElementById('stkAttitude').value,
+    phone:document.getElementById('stkPhone').value.trim(),email:document.getElementById('stkEmail').value.trim(),
+    focus:document.getElementById('stkFocus').value.trim(),notes:document.getElementById('stkNotes').value.trim(),
+    updated:today()
+  };
+  if(id){const i=store.stakeholders[pid].findIndex(x=>x.id===id);if(i>-1)store.stakeholders[pid][i]=data}
+  else store.stakeholders[pid].push(data);
+  persist();closeMask('mStakeholder');renderStakeholders();toast('已保存');
+}
+function delStakeholder(id){if(!confirm('确定删除该干系人？'))return;const pid=document.getElementById('stkProj').value;store.stakeholders[pid]=(store.stakeholders[pid]||[]).filter(x=>x.id!==id);persist();renderStakeholders();toast('已删除')}
+
+/* ================= 合同管理 ================= */
+function renderContracts(){
+  const el=document.getElementById('ctBody');
+  fillProjSelect('ctProj',currentProjectId);
+  const pid=document.getElementById('ctProj').value;
+  const p=getProj(pid);
+  if(!p){el.innerHTML='<div class="card"><div class="empty">暂无项目，请先在「项目管理」中创建</div></div>';return}
+  const c=store.contracts[pid]||{attachments:[]};
+  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div><h3 style="margin:0">${esc(p.name)} 合同信息</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)}</div></div>
+    <button class="btn" onclick="openContractModal()">编辑合同信息</button></div>
+    <div class="grid g4" style="font-size:13px">`;
+  h+=`<div><span style="color:var(--sub)">合同编号</span><br><b>${esc(c.contractNo||'—')}</b></div>`;
+  h+=`<div><span style="color:var(--sub)">合同金额</span><br><b>${c.amount!==undefined&&c.amount!==''?esc(c.amount)+' 万':'—'}</b></div>`;
+  h+=`<div><span style="color:var(--sub)">签订日期</span><br><b>${esc(c.signDate||'—')}</b></div>`;
+  h+=`<div><span style="color:var(--sub)">交付/到期日期</span><br><b>${esc(c.endDate||'—')}</b></div>`;
+  h+=`<div><span style="color:var(--sub)">付款条款</span><br><b>${esc(c.paymentTerms||'—')}</b></div>`;
+  h+=`<div><span style="color:var(--sub)">状态</span><br><b>${esc(c.status||'—')}</b></div>`;
+  h+=`</div><div style="margin-top:10px"><span style="color:var(--sub)">备注</span><br>${esc(c.notes||'—')}</div></div>`;
+  h+=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">合同附件</h3>
+    <label class="btn sm" style="cursor:pointer">⬆ 上传附件<input type="file" style="display:none" onchange="uploadContractFile(this)"></label></div>`;
+  const atts=c.attachments||[];
+  if(!atts.length){h+='<div class="empty">暂无附件</div></div>';el.innerHTML=h;return}
+  h+=`<table><tr><th>文件名</th><th>大小</th><th>上传日期</th><th style="width:140px">操作</th></tr>`+
+  atts.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td>${fmtSize(a.size)}</td><td>${esc(a.date||'—')}</td>
+    <td><a class="btn sm ghost" href="/api/files/download/${encodeURIComponent(a.fileId)}" target="_blank">下载</a>
+    <button class="btn sm danger" onclick="delContractFile('${a.fileId}')">删除</button></td></tr>`).join('')+'</table></div>';
+  el.innerHTML=h;
+}
+function openContractModal(){
+  const pid=document.getElementById('ctProj').value;
+  const c=store.contracts[pid]||{attachments:[]};
+  document.getElementById('ctId').value=pid;
+  document.getElementById('ctNo').value=c.contractNo||'';
+  document.getElementById('ctAmount').value=c.amount||'';
+  document.getElementById('ctSignDate').value=c.signDate||'';
+  document.getElementById('ctEndDate').value=c.endDate||'';
+  document.getElementById('ctPayment').value=c.paymentTerms||'';
+  document.getElementById('ctStatus').value=c.status||'洽谈中';
+  document.getElementById('ctNotes').value=c.notes||'';
+  openMask('mContract');
+}
+function saveContract(){
+  const pid=document.getElementById('ctProj').value;if(!pid)return;
+  store.contracts[pid]={
+    contractNo:document.getElementById('ctNo').value.trim(),
+    amount:document.getElementById('ctAmount').value,
+    signDate:document.getElementById('ctSignDate').value,
+    endDate:document.getElementById('ctEndDate').value,
+    paymentTerms:document.getElementById('ctPayment').value.trim(),
+    status:document.getElementById('ctStatus').value,
+    notes:document.getElementById('ctNotes').value.trim(),
+    attachments:(store.contracts[pid]||{}).attachments||[]
+  };
+  persist();closeMask('mContract');renderContracts();toast('已保存');
+}
+async function uploadContractFile(inp){
+  const pid=document.getElementById('ctProj').value;if(!pid||!inp.files[0])return;
+  const file=inp.files[0];
+  try{
+    const r=await fetch('/api/files/upload',{method:'POST',headers:{'x-filename':encodeURIComponent(file.name)},body:file});
+    const d=await r.json();if(!d.ok)throw new Error(d.error);
+    store.contracts[pid]=store.contracts[pid]||{attachments:[]};
+    store.contracts[pid].attachments.push({fileId:d.fileId,name:d.name,size:d.size,date:today()});
+    persist();renderContracts();toast('上传成功');
+  }catch(e){toast('上传失败：'+e.message)}
+  inp.value='';
+}
+async function delContractFile(fileId){
+  if(!confirm('确定删除该附件？'))return;
+  const pid=document.getElementById('ctProj').value;
+  try{await fetch('/api/files/'+encodeURIComponent(fileId),{method:'DELETE'})}catch(_){}
+  store.contracts[pid].attachments=(store.contracts[pid].attachments||[]).filter(a=>a.fileId!==fileId);
+  persist();renderContracts();toast('已删除');
+}
+
+/* ================= 报价管理 ================= */
+function renderQuotations(){
+  const el=document.getElementById('qtBody');
+  fillProjSelect('qtProj',currentProjectId);
+  const pid=document.getElementById('qtProj').value;
+  const p=getProj(pid);
+  if(!p){el.innerHTML='<div class="card"><div class="empty">暂无项目，请先在「项目管理」中创建</div></div>';return}
+  const list=store.quotations[pid]||[];
+  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div><h3 style="margin:0">${esc(p.name)} 报价记录</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 共 ${list.length} 版</div></div>
+    <button class="btn" onclick="openQuotationModal()">＋ 新增报价</button></div>`;
+  if(!list.length){h+='<div class="empty">暂无报价，点击右上角新增</div></div>';el.innerHTML=h;return}
+  h+=`<table><tr><th>版本</th><th>日期</th><th>成本合计(万)</th><th>对外报价(万)</th><th>利润(万)</th><th>利润率</th><th>状态</th><th style="width:180px">操作</th></tr>`+
+  list.map(q=>{
+    const cost=sumQtCost(q),quote=sumQtQuote(q),profit=quote-cost,margin=quote?Math.round(profit/quote*100):0;
+    return `<tr>
+      <td><b>${esc(q.name)}</b></td><td>${esc(q.date||'—')}</td><td>${cost.toFixed(2)}</td><td>${quote.toFixed(2)}</td>
+      <td>${profit.toFixed(2)}</td><td style="color:${margin>=30?'var(--ok)':margin>=15?'#b25e0c':'var(--bad)'}">${margin}%</td>
+      <td>${esc(q.status||'草稿')}</td>
+      <td><button class="btn sm ghost" onclick="openQuotationModal('${q.id}')">编辑</button>
+        ${q.excelFile?`<a class="btn sm ghost" href="/api/files/download/${encodeURIComponent(q.excelFile.fileId)}" target="_blank">下载Excel</a>`:`<label class="btn sm ghost" style="cursor:pointer">上传Excel<input type="file" accept=".xlsx,.xls" style="display:none" onchange="uploadQuotationExcel(this,'${q.id}')"></label>`}
+        <button class="btn sm danger" onclick="delQuotation('${q.id}')">删除</button></td></tr>`
+  }).join('')+'</table></div>';
+  if(list.length){
+    const latest=list[0];
+    const cost=sumQtCost(latest),quote=sumQtQuote(latest),profit=quote-cost,margin=quote?Math.round(profit/quote*100):0;
+    h+=`<div class="card"><h3>最新报价利润分析（${esc(latest.name)}）</h3>
+      <div class="grid g4" style="font-size:13px">
+        <div><span style="color:var(--sub)">成本合计</span><br><b style="font-size:20px">${cost.toFixed(2)}</b> 万</div>
+        <div><span style="color:var(--sub)">对外报价</span><br><b style="font-size:20px">${quote.toFixed(2)}</b> 万</div>
+        <div><span style="color:var(--sub)">预计利润</span><br><b style="font-size:20px;color:${profit>=0?'var(--ok)':'var(--bad)'}">${profit.toFixed(2)}</b> 万</div>
+        <div><span style="color:var(--sub)">利润率</span><br><b style="font-size:20px;color:${margin>=30?'var(--ok)':margin>=15?'#b25e0c':'var(--bad)'}">${margin}%</b></div>
+      </div>
+      <div class="hint" style="margin-top:12px">${margin>=30?'利润率健康，有议价空间。':margin>=15?'利润率中等，注意成本控制与报价策略。':'利润率偏低，需复核成本或调整方案。'}</div>
+    </div>`;
+  }
+  el.innerHTML=h;
+}
+function sumQtCost(q){return (q.items||[]).reduce((s,it)=>s+(parseFloat(it.cost)||0)*(parseFloat(it.qty)||1),0)}
+function sumQtQuote(q){return (q.items||[]).reduce((s,it)=>s+(parseFloat(it.quote)||0)*(parseFloat(it.qty)||1),0)}
+let _qtItems=[];
+function openQuotationModal(id){
+  const pid=document.getElementById('qtProj').value;
+  const q=id?(store.quotations[pid]||[]).find(x=>x.id===id):null;
+  document.getElementById('qtModalTitle').textContent=q?'编辑报价':'新增报价';
+  document.getElementById('qtId').value=q?q.id:'';
+  document.getElementById('qtName').value=q?q.name:'';
+  document.getElementById('qtDate').value=q?q.date:today();
+  document.getElementById('qtStatus').value=q?q.status:'草稿';
+  document.getElementById('qtNotes').value=q?q.notes:'';
+  _qtItems=q&&q.items?q.items.map(x=>({...x})):[];
+  renderQtItems();
+  openMask('mQuotation');
+}
+function renderQtItems(){
+  document.getElementById('qtItems').innerHTML=_qtItems.length?`<table><tr><th>名称</th><th>数量</th><th>成本单价(万)</th><th>报价单价(万)</th><th>小计成本</th><th>小计报价</th><th>备注</th><th></th></tr>`+
+  _qtItems.map((it,i)=>`<tr>
+    <td><input value="${esc(it.name||'')}" onchange="_qtItems[${i}].name=this.value" placeholder="成本项"></td>
+    <td><input type="number" value="${esc(it.qty||1)}" onchange="_qtItems[${i}].qty=this.value" style="width:70px"></td>
+    <td><input type="number" step="0.01" value="${esc(it.cost||0)}" onchange="_qtItems[${i}].cost=this.value" style="width:110px"></td>
+    <td><input type="number" step="0.01" value="${esc(it.quote||0)}" onchange="_qtItems[${i}].quote=this.value" style="width:110px"></td>
+    <td>${((parseFloat(it.cost)||0)*(parseFloat(it.qty)||1)).toFixed(2)}</td>
+    <td>${((parseFloat(it.quote)||0)*(parseFloat(it.qty)||1)).toFixed(2)}</td>
+    <td><input value="${esc(it.remark||'')}" onchange="_qtItems[${i}].remark=this.value" placeholder="备注"></td>
+    <td><button class="btn sm danger" onclick="_qtItems.splice(${i},1);renderQtItems()">✕</button></td>
+  </tr>`).join('')+'</table>':'<div class="empty">暂无明细，点击下方添加</div>';
+}
+function addQtItem(){_qtItems.push({name:'',qty:1,cost:0,quote:0,remark:''});renderQtItems()}
+async function saveQuotation(){
+  const pid=document.getElementById('qtProj').value;if(!pid)return;
+  const name=document.getElementById('qtName').value.trim();if(!name){toast('请填写版本/名称');return}
+  store.quotations[pid]=store.quotations[pid]||[];
+  const id=document.getElementById('qtId').value;
+  const data={id:id||uid(),name,date:document.getElementById('qtDate').value,status:document.getElementById('qtStatus').value,
+    notes:document.getElementById('qtNotes').value.trim(),items:_qtItems.map(x=>({...x}))};
+  if(id){const i=store.quotations[pid].findIndex(x=>x.id===id);if(i>-1){data.excelFile=store.quotations[pid][i].excelFile;store.quotations[pid][i]=data}}
+  else store.quotations[pid].unshift(data);
+  persist();closeMask('mQuotation');renderQuotations();toast('已保存');
+}
+async function uploadQuotationExcel(inp,qid){
+  const pid=document.getElementById('qtProj').value;if(!pid||!inp.files[0]||!qid)return;
+  const file=inp.files[0];
+  try{
+    const r=await fetch('/api/files/upload',{method:'POST',headers:{'x-filename':encodeURIComponent(file.name)},body:file});
+    const d=await r.json();if(!d.ok)throw new Error(d.error);
+    const list=store.quotations[pid]||[];const q=list.find(x=>x.id===qid);
+    if(q){q.excelFile={fileId:d.fileId,name:d.name,size:d.size,date:today()};persist();renderQuotations();toast('Excel 已上传')}
+  }catch(e){toast('上传失败：'+e.message)}
+  inp.value='';
+}
+function delQuotation(id){if(!confirm('确定删除该报价？'))return;const pid=document.getElementById('qtProj').value;store.quotations[pid]=(store.quotations[pid]||[]).filter(x=>x.id!==id);persist();renderQuotations();toast('已删除')}
+
+/* ================= 竞争情报 ================= */
+function renderCompintel(){
+  const el=document.getElementById('ciBody');
+  const sel=document.getElementById('ciProjFilter');
+  sel.innerHTML='<option value="">全部项目</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const kw=(document.getElementById('ciSearch').value||'').toLowerCase();
+  const pf=document.getElementById('ciProjFilter').value;
+  let list=store.compintel.slice();
+  if(pf)list=list.filter(x=>x.projectId===pf);
+  if(kw)list=list.filter(x=>(x.competitor+' '+x.product+' '+x.strategy+' '+x.source).toLowerCase().includes(kw));
+  if(!list.length){el.innerHTML='<div class="empty">暂无竞争情报，点击右上角新增</div>';return}
+  el.innerHTML=list.map(ci=>{
+    const p=ci.projectId?getProj(ci.projectId):null;
+    return `<div class="kb-item"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <b>${esc(ci.competitor)}</b>${ci.product?`<span class="tag">${esc(ci.product)}</span>`:''}${p?`<span class="tag">${esc(p.name)}</span>`:''}
+      <div style="flex:1"></div>
+      <span style="font-size:12px;color:var(--sub)">${esc(ci.date||'—')}</span>
+      <button class="btn sm ghost" onclick="openCiModal('${ci.id}')">编辑</button>
+      <button class="btn sm danger" onclick="delCompintel('${ci.id}')">删除</button></div>
+      <div class="grid g2" style="margin-top:10px;font-size:12.5px">
+        ${ci.price!==undefined&&ci.price!==''?`<div><span style="color:var(--sub)">报价</span><br><b>${esc(ci.price)} 万</b></div>`:''}
+        ${ci.source?`<div><span style="color:var(--sub)">来源</span><br>${esc(ci.source)}</div>`:''}
+      </div>
+      ${ci.strategy?`<div class="body"><b>市场策略</b><br>${esc(ci.strategy)}</div>`:''}
+      ${ci.strengths||ci.weaknesses?`<div style="display:flex;gap:12px;margin-top:8px;font-size:12.5px">
+        ${ci.strengths?`<div style="flex:1;background:#e6f4ea;border-radius:8px;padding:10px"><b style="color:var(--ok)">优势</b><br>${esc(ci.strengths)}</div>`:''}
+        ${ci.weaknesses?`<div style="flex:1;background:#fde8ef;border-radius:8px;padding:10px"><b style="color:var(--bad)">劣势</b><br>${esc(ci.weaknesses)}</div>`:''}
+      </div>`:''}
+    </div>`}).join('');
+}
+function openCiModal(id){
+  const ci=id?store.compintel.find(x=>x.id===id):null;
+  document.getElementById('ciModalTitle').textContent=ci?'编辑竞争情报':'新增竞争情报';
+  document.getElementById('ciId').value=ci?ci.id:'';
+  fillProjSelect('ciProj',ci?ci.projectId:'');
+  document.getElementById('ciCompetitor').value=ci?ci.competitor:'';
+  document.getElementById('ciProduct').value=ci?ci.product:'';
+  document.getElementById('ciPrice').value=ci?ci.price:'';
+  document.getElementById('ciSource').value=ci?ci.source:'';
+  document.getElementById('ciDate').value=ci?ci.date:today();
+  document.getElementById('ciStrategy').value=ci?ci.strategy:'';
+  document.getElementById('ciStrengths').value=ci?ci.strengths:'';
+  document.getElementById('ciWeaknesses').value=ci?ci.weaknesses:'';
+  openMask('mCompintel');
+}
+function saveCompintel(){
+  const competitor=document.getElementById('ciCompetitor').value.trim();if(!competitor){toast('请填写竞争对手');return}
+  const id=document.getElementById('ciId').value;
+  const data={
+    id:id||uid(),competitor,projectId:document.getElementById('ciProj').value||null,
+    product:document.getElementById('ciProduct').value.trim(),price:document.getElementById('ciPrice').value,
+    source:document.getElementById('ciSource').value.trim(),date:document.getElementById('ciDate').value,
+    strategy:document.getElementById('ciStrategy').value.trim(),
+    strengths:document.getElementById('ciStrengths').value.trim(),
+    weaknesses:document.getElementById('ciWeaknesses').value.trim()
+  };
+  if(id){const i=store.compintel.findIndex(x=>x.id===id);if(i>-1)store.compintel[i]=data}
+  else store.compintel.unshift(data);
+  persist();closeMask('mCompintel');renderCompintel();toast('已保存');
+}
+function delCompintel(id){if(!confirm('确定删除该情报？'))return;store.compintel=store.compintel.filter(x=>x.id!==id);persist();renderCompintel();toast('已删除')}
+
+/* ================= 需求管理 ================= */
+function renderRequirements(){
+  const el=document.getElementById('rqBody');
+  fillProjSelect('rqProj',currentProjectId);
+  const pid=document.getElementById('rqProj').value;
+  const p=getProj(pid);
+  if(!p){el.innerHTML='<div class="card"><div class="empty">暂无项目，请先在「项目管理」中创建</div></div>';return}
+  const list=store.requirements[pid]||[];
+  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div><h3 style="margin:0">${esc(p.name)} 需求收集与分析</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 共 ${list.length} 条</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn ghost" onclick="jumpToPdocsInput('${pid}')">汇入项目知识库 →</button>
+      <button class="btn" onclick="openRequirementModal()">＋ 新增需求</button></div></div>`;
+  if(!list.length){h+='<div class="empty">暂无需求，点击右上角新增，或去项目知识库录入原始输入</div></div>';el.innerHTML=h;return}
+  h+=`<table><tr><th>标题</th><th>类别</th><th>优先级</th><th>来源</th><th>状态</th><th>分析结论</th><th style="width:120px">操作</th></tr>`+
+  list.map(r=>`<tr>
+    <td><b>${esc(r.title)}</b></td><td>${esc(r.category||'—')}</td><td>${priorityBadge(r.priority)}</td>
+    <td>${esc(r.source||'—')}</td><td>${reqStatusBadge(r.status)}</td>
+    <td style="max-width:260px">${esc(r.analysis||'—')}</td>
+    <td><button class="btn sm ghost" onclick="openRequirementModal('${r.id}')">编辑</button>
+    <button class="btn sm danger" onclick="delRequirement('${r.id}')">删除</button></td></tr>`).join('')+'</table></div>';
+  const counts={high:0,medium:0,low:0,pending:0,analyzed:0,approved:0};
+  list.forEach(r=>{counts[r.priority]=(counts[r.priority]||0)+1;counts[r.status]=(counts[r.status]||0)+1});
+  h+=`<div class="card"><h3>需求统计</h3><div class="grid g4" style="font-size:13px">
+    <div><span style="color:var(--sub)">高优先级</span><br><b>${counts.high}</b></div>
+    <div><span style="color:var(--sub)">中优先级</span><br><b>${counts.medium}</b></div>
+    <div><span style="color:var(--sub)">低优先级</span><br><b>${counts.low}</b></div>
+    <div><span style="color:var(--sub)">待分析</span><br><b>${counts.pending}</b></div>
+  </div></div>`;
+  el.innerHTML=h;
+}
+function priorityBadge(v){return v==='high'?'<span class="tag" style="background:#fde8ef;color:var(--bad)">高</span>':v==='low'?'<span class="tag" style="background:#e6f4ea;color:var(--ok)">低</span>':'<span class="tag">中</span>'}
+function reqStatusBadge(v){const map={pending:'待分析',analyzed:'已分析',approved:'已确认',rejected:'已放弃'};return `<span class="tag">${map[v]||v}</span>`}
+function openRequirementModal(id){
+  const pid=document.getElementById('rqProj').value;
+  const r=id?(store.requirements[pid]||[]).find(x=>x.id===id):null;
+  document.getElementById('rqModalTitle').textContent=r?'编辑需求':'新增需求';
+  document.getElementById('rqId').value=r?r.id:'';
+  document.getElementById('rqTitle').value=r?r.title:'';
+  document.getElementById('rqCategory').value=r?r.category:'业务需求';
+  document.getElementById('rqPriority').value=r?r.priority:'medium';
+  document.getElementById('rqStatus').value=r?r.status:'pending';
+  document.getElementById('rqSource').value=r?r.source:'';
+  document.getElementById('rqKb').value=r?r.relatedKb:'';
+  document.getElementById('rqDesc').value=r?r.description:'';
+  document.getElementById('rqAnalysis').value=r?r.analysis:'';
+  openMask('mRequirement');
+}
+function saveRequirement(){
+  const pid=document.getElementById('rqProj').value;if(!pid)return;
+  const title=document.getElementById('rqTitle').value.trim();if(!title){toast('请填写需求标题');return}
+  store.requirements[pid]=store.requirements[pid]||[];
+  const id=document.getElementById('rqId').value;
+  const data={
+    id:id||uid(),title,category:document.getElementById('rqCategory').value,
+    priority:document.getElementById('rqPriority').value,status:document.getElementById('rqStatus').value,
+    source:document.getElementById('rqSource').value.trim(),relatedKb:document.getElementById('rqKb').value.trim(),
+    description:document.getElementById('rqDesc').value.trim(),analysis:document.getElementById('rqAnalysis').value.trim(),
+    updated:today()
+  };
+  if(id){const i=store.requirements[pid].findIndex(x=>x.id===id);if(i>-1)store.requirements[pid][i]=data}
+  else store.requirements[pid].push(data);
+  persist();closeMask('mRequirement');renderRequirements();toast('已保存');
+}
+function delRequirement(id){if(!confirm('确定删除该需求？'))return;const pid=document.getElementById('rqProj').value;store.requirements[pid]=(store.requirements[pid]||[]).filter(x=>x.id!==id);persist();renderRequirements();toast('已删除')}
+function jumpToPdocsInput(pid){
+  pdPid=pid;pdTab='input';pdFolder='root';show('pdocs');toast('已切换到项目知识库 · 输入分类');
+}
+
+/* ================= 项目详情新标签：干系人 / 合同 ================= */
+function renderDtStk(p){
+  const list=store.stakeholders[p.id]||[];
+  return `<div class="card"><h3>项目干系人</h3>
+    ${list.length?`<table><tr><th>姓名</th><th>角色</th><th>部门/职务</th><th>影响力</th><th>态度</th><th>关注重点</th></tr>`+
+    list.map(s=>`<tr><td><b>${esc(s.name||'—')}</b></td><td>${esc(s.role||'—')}</td><td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
+      <td>${influenceBadge(s.influence)}</td><td>${attitudeBadge(s.attitude)}</td><td>${esc(s.focus||'')}</td></tr>`).join('')+'</table>'
+    :'<div class="empty">暂无干系人</div>'}
+    <div style="margin-top:12px"><button class="btn" onclick="show('stakeholders')">前往干系人管理 →</button></div></div>`;
+}
+function renderDtContract(p){
+  const c=store.contracts[p.id]||{attachments:[]};
+  return `<div class="card"><h3>合同信息</h3>
+    <div class="grid g4" style="font-size:13px">
+      <div><span style="color:var(--sub)">合同编号</span><br><b>${esc(c.contractNo||'—')}</b></div>
+      <div><span style="color:var(--sub)">合同金额</span><br><b>${c.amount!==undefined&&c.amount!==''?esc(c.amount)+' 万':'—'}</b></div>
+      <div><span style="color:var(--sub)">签订日期</span><br><b>${esc(c.signDate||'—')}</b></div>
+      <div><span style="color:var(--sub)">状态</span><br><b>${esc(c.status||'—')}</b></div>
+    </div>
+    <div style="margin-top:10px"><span style="color:var(--sub)">付款条款</span><br>${esc(c.paymentTerms||'—')}</div>
+    <div style="margin-top:10px"><span style="color:var(--sub)">备注</span><br>${esc(c.notes||'—')}</div>
+    ${(c.attachments||[]).length?`<div style="margin-top:12px"><b>合同附件</b><br>${c.attachments.map(a=>`<a href="/api/files/download/${encodeURIComponent(a.fileId)}" target="_blank">${esc(a.name)}</a>`).join('、')}</div>`:''}
+    <div style="margin-top:12px"><button class="btn" onclick="show('contracts')">前往合同管理 →</button></div></div>`;
+}
+
 /* ================= 演示种子数据 ================= */
 function seed(){
   if(store.projects.length||store.kb.length){return}
@@ -892,6 +1311,28 @@ function seed(){
     {id:'k2',title:'标杆案例：省会城市X政务云',catId:catOf('案例库'),tags:['政务云','案例','标杆'],content:'2024年建成，服务68个委办局，承载1200+业务系统，双十一式高峰零故障，获省级优秀案例。可提供现场参观。',date:today()},
     {id:'k3',title:'A公司竞争情报',catId:catOf('竞品情报'),tags:['A公司','竞争'],content:'优势：一期承建粘性、本地团队大。劣势：多云纳管能力弱、报价高、二期有资源利用率投诉。应对：主打一云多芯开放架构+利用率承诺SLA。',date:today()}];
   store.pdocs={demo1:{input:[{id:uid(),name:'政务云二期需求建议书（客户邮件附件）',kind:'PDF',size:0,date:today(),from:'登记',note:'客户信息中心发送 v1.2',content:''}],process:{folders:[{id:'f1',name:'调研记录',docs:[{id:uid(),name:'信息中心王主任访谈纪要',kind:'MD',size:0,date:today(),from:'上传',note:'2026-08 现场调研',content:'要点：一期利用率不足35%；二期考核指标为跨部门共享率；副局长关注自主可控。'}]}],docs:[]},output:[],ref:[{id:uid(),name:'GB/T 政务云安全要求',kind:'PDF',size:0,date:today(),from:'登记',note:'标准规范参考',content:''}]}};
+  store.stakeholders={demo1:[
+    {id:uid(),name:'王建国',title:'信息中心主任',dept:'市大数据局',role:'技术把关',influence:'high',attitude:'support',phone:'138****1234',email:'wang@example.gov',focus:'自主可控、资源利用率、后续运维便利性',notes:'可发展为教练，多次透露友商弱点',updated:today()},
+    {id:uid(),name:'李副局长',title:'副局长',dept:'市大数据局',role:'决策者',influence:'high',attitude:'neutral',phone:'',email:'',focus:'政绩、预算可控、风险低',notes:'尚未直接交流，需通过王主任安排',updated:today()}
+  ]};
+  store.contracts={demo1:{contractNo:'HT-2026-ZWYC-002',amount:860,signDate:'',endDate:'2027-10-15',paymentTerms:'3:6:1',status:'洽谈中',notes:'按招标文件付款条款，预留 10% 质保金一年',attachments:[]}};
+  store.quotations={demo1:[
+    {id:uid(),name:'V1 初版报价',date:today(),status:'草稿',notes:'含软硬件、实施、三年维保',excelFile:null,
+     items:[{name:'云平台软件授权',qty:1,cost:120,quote:180,remark:'含一云多芯、算力调度'},
+            {name:'硬件服务器',qty:8,cost:240,quote:320,remark:'信创服务器'},
+            {name:'实施与集成',qty:1,cost:80,quote:120,remark:'90天交付'},
+            {name:'三年维保',qty:1,cost:60,quote:90,remark:'7×24'}]}
+  ]};
+  store.compintel=[
+    {id:uid(),competitor:'A公司',projectId:'demo1',product:'政务云一期续建方案',price:920,source:'客户透露/公开中标公告',date:today(),
+     strategy:'强调一期粘性与迁移成本，承诺免费平滑升级',strengths:'一期承建商，数据迁移风险低，客户关系深',weaknesses:'多云纳管能力弱，二期扩容报价高，一期利用率投诉未解决'}
+  ];
+  store.requirements={demo1:[
+    {id:uid(),title:'跨部门数据共享T+0',category:'业务需求',priority:'high',status:'analyzed',source:'招标文件 / 客户访谈',relatedKb:'标杆案例：省会城市X政务云',
+     description:'打破委办局数据壁垒，实现跨部门共享实时可达',analysis:'我方数据共享交换平台已验证，T+0 能力可支持；需在方案中给出架构图与性能指标'},
+    {id:uid(),title:'一云多芯统一纳管',category:'非功能需求',priority:'high',status:'pending',source:'招标文件',relatedKb:'我司政务云解决方案白皮书',
+     description:'支持鲲鹏、海光、飞腾等多种芯片架构的统一管理与调度',analysis:''}
+  ]};
   persist();
 }
 

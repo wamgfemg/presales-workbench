@@ -19,6 +19,11 @@
       <button data-p="docs"><span class="ico">📝</span>方案制作中心</button>
       <button data-p="c139"><span class="ico">🎯</span>C139 赢单评估</button>
       <button data-p="tools"><span class="ico">🧰</span>投标工具箱</button>
+      <button data-p="stakeholders"><span class="ico">🧑‍🤝‍🧑</span>干系人管理</button>
+      <button data-p="contracts"><span class="ico">📋</span>合同管理</button>
+      <button data-p="quotations"><span class="ico">💰</span>报价管理</button>
+      <button data-p="compintel"><span class="ico">🕵️</span>竞争情报</button>
+      <button data-p="requirements"><span class="ico">📋</span>需求管理</button>
     </nav>
     <div class="side-foot">
       数据保存在本机浏览器
@@ -80,6 +85,8 @@
         <button data-t="tl">时间线</button>
         <button data-t="c">C139 快评</button>
         <button data-t="doc">本项目文档</button>
+        <button data-t="stk">项目干系人</button>
+        <button data-t="contract">合同信息</button>
       </div>
       <div id="dtBody"></div>
     </section>
@@ -149,6 +156,47 @@
         </div>
         <div class="card"><h3>方法论速查</h3><div id="methodRef"></div></div>
       </div>
+    </section>
+
+    <!-- ============ 干系人管理 ============ -->
+    <section class="page" id="p-stakeholders">
+      <div class="page-head"><div><h2>干系人管理</h2><div class="desc">识别、记录并持续跟踪每个项目的决策链与关键人</div></div>
+        <select id="stkProj" onchange="renderStakeholders()" style="width:260px"></select></div>
+      <div id="stkBody"></div>
+    </section>
+
+    <!-- ============ 合同管理 ============ -->
+    <section class="page" id="p-contracts">
+      <div class="page-head"><div><h2>合同管理</h2><div class="desc">记录项目合同关键信息并归档合同附件</div></div>
+        <select id="ctProj" onchange="renderContracts()" style="width:260px"></select></div>
+      <div id="ctBody"></div>
+    </section>
+
+    <!-- ============ 报价管理 ============ -->
+    <section class="page" id="p-quotations">
+      <div class="page-head"><div><h2>报价管理</h2><div class="desc">成本评估、对外报价与利润率分析；支持 Excel 上传与下载</div></div>
+        <select id="qtProj" onchange="renderQuotations()" style="width:260px"></select></div>
+      <div id="qtBody"></div>
+    </section>
+
+    <!-- ============ 竞争情报 ============ -->
+    <section class="page" id="p-compintel">
+      <div class="page-head"><div><h2>竞争情报</h2><div class="desc">搜集并分析竞争对手产品、价格、市场策略与动态</div></div>
+        <button class="btn" onclick="openCiModal()">＋ 新增情报</button></div>
+      <div class="card">
+        <div class="searchbar">
+          <input id="ciSearch" placeholder="搜索对手 / 产品 / 策略…" oninput="renderCompintel()">
+          <select id="ciProjFilter" onchange="renderCompintel()" style="width:180px"><option value="">全部项目</option></select>
+        </div>
+        <div id="ciBody"></div>
+      </div>
+    </section>
+
+    <!-- ============ 需求管理 ============ -->
+    <section class="page" id="p-requirements">
+      <div class="page-head"><div><h2>需求管理</h2><div class="desc">收集、分析与跟踪项目需求，并汇入项目知识库</div></div>
+        <select id="rqProj" onchange="renderRequirements()" style="width:260px"></select></div>
+      <div id="rqBody"></div>
     </section>
   </main>
 </div>
@@ -228,6 +276,98 @@
   <label class="f"><span>备注</span><input id="pdmNote" placeholder="版本/用途说明，可选"></label>
   <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mPdMove')">取消</button>
   <button class="btn" style="margin-left:10px" onclick="pdmConfirm()">确认归档</button></div>
+</div></div>
+
+<!-- 干系人编辑 -->
+<div class="mask" id="mStakeholder"><div class="modal">
+  <h3><span id="stkModalTitle">新增干系人</span><button class="x" onclick="closeMask('mStakeholder')">✕</button></h3>
+  <input type="hidden" id="stkId">
+  <div class="grid g2">
+    <label class="f"><span>姓名 *</span><input id="stkName"></label>
+    <label class="f"><span>职务/岗位</span><input id="stkTitle"></label>
+    <label class="f"><span>部门</span><input id="stkDept"></label>
+    <label class="f"><span>角色</span><select id="stkRole"><option value="">— 请选择 —</option><option>决策者</option><option>技术把关</option><option>使用方</option><option>教练</option><option>影响者</option><option>其他</option></select></label>
+    <label class="f"><span>影响力</span><select id="stkInfluence"><option value="high">高</option><option value="medium" selected>中</option><option value="low">低</option></select></label>
+    <label class="f"><span>态度倾向</span><select id="stkAttitude"><option value="support">支持</option><option value="neutral" selected>中立</option><option value="oppose">反对</option></select></label>
+    <label class="f"><span>联系电话</span><input id="stkPhone"></label>
+    <label class="f"><span>邮箱</span><input id="stkEmail"></label>
+  </div>
+  <label class="f"><span>关注重点/诉求</span><textarea id="stkFocus" rows="2"></textarea></label>
+  <label class="f"><span>备注</span><textarea id="stkNotes" rows="2"></textarea></label>
+  <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mStakeholder')">取消</button>
+  <button class="btn" style="margin-left:10px" onclick="saveStakeholder()">保存</button></div>
+</div></div>
+
+<!-- 合同信息编辑 -->
+<div class="mask" id="mContract"><div class="modal">
+  <h3><span>合同信息</span><button class="x" onclick="closeMask('mContract')">✕</button></h3>
+  <input type="hidden" id="ctId">
+  <div class="grid g2">
+    <label class="f"><span>合同编号</span><input id="ctNo" placeholder="如 HT-2026-001"></label>
+    <label class="f"><span>合同金额（万元）</span><input id="ctAmount" type="number" step="0.01"></label>
+    <label class="f"><span>签订日期</span><input id="ctSignDate" type="date"></label>
+    <label class="f"><span>交付日期</span><input id="ctEndDate" type="date"></label>
+    <label class="f"><span>付款条款</span><input id="ctPayment" placeholder="如 3:6:1"></label>
+    <label class="f"><span>合同状态</span><select id="ctStatus"><option>洽谈中</option><option>已签订</option><option>执行中</option><option>已验收</option><option>已回款</option></select></label>
+  </div>
+  <label class="f"><span>备注</span><textarea id="ctNotes" rows="3"></textarea></label>
+  <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mContract')">取消</button>
+  <button class="btn" style="margin-left:10px" onclick="saveContract()">保存</button></div>
+</div></div>
+
+<!-- 报价编辑 -->
+<div class="mask" id="mQuotation"><div class="modal wide">
+  <h3><span id="qtModalTitle">新增报价</span><button class="x" onclick="closeMask('mQuotation')">✕</button></h3>
+  <input type="hidden" id="qtId">
+  <div class="grid g3">
+    <label class="f"><span>版本/名称 *</span><input id="qtName" placeholder="如 V1 初版报价"></label>
+    <label class="f"><span>报价日期</span><input id="qtDate" type="date"></label>
+    <label class="f"><span>状态</span><select id="qtStatus"><option>草稿</option><option>已提交</option><option>已中标</option><option>已失效</option></select></label>
+  </div>
+  <div class="card"><h3>成本与报价明细</h3>
+    <div id="qtItems"></div>
+    <button class="btn sm ghost" style="margin-top:10px" onclick="addQtItem()">＋ 添加明细</button>
+  </div>
+  <label class="f"><span>报价说明 / 策略</span><textarea id="qtNotes" rows="3"></textarea></label>
+  <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mQuotation')">取消</button>
+  <button class="btn" style="margin-left:10px" onclick="saveQuotation()">保存</button></div>
+</div></div>
+
+<!-- 竞争情报编辑 -->
+<div class="mask" id="mCompintel"><div class="modal">
+  <h3><span id="ciModalTitle">新增竞争情报</span><button class="x" onclick="closeMask('mCompintel')">✕</button></h3>
+  <input type="hidden" id="ciId">
+  <div class="grid g2">
+    <label class="f"><span>竞争对手 *</span><input id="ciCompetitor"></label>
+    <label class="f"><span>关联项目</span><select id="ciProj"><option value="">— 不限 —</option></select></label>
+    <label class="f"><span>产品/方案</span><input id="ciProduct"></label>
+    <label class="f"><span>价格/报价（万元）</span><input id="ciPrice" type="number" step="0.01"></label>
+    <label class="f"><span>情报来源</span><input id="ciSource" placeholder="如 客户透露 / 公开信息 / 友商材料"></label>
+    <label class="f"><span>日期</span><input id="ciDate" type="date"></label>
+  </div>
+  <label class="f"><span>市场策略</span><textarea id="ciStrategy" rows="2"></textarea></label>
+  <label class="f"><span>优势</span><textarea id="ciStrengths" rows="2"></textarea></label>
+  <label class="f"><span>劣势</span><textarea id="ciWeaknesses" rows="2"></textarea></label>
+  <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mCompintel')">取消</button>
+  <button class="btn" style="margin-left:10px" onclick="saveCompintel()">保存</button></div>
+</div></div>
+
+<!-- 需求编辑 -->
+<div class="mask" id="mRequirement"><div class="modal">
+  <h3><span id="rqModalTitle">新增需求</span><button class="x" onclick="closeMask('mRequirement')">✕</button></h3>
+  <input type="hidden" id="rqId">
+  <div class="grid g2">
+    <label class="f"><span>需求标题 *</span><input id="rqTitle"></label>
+    <label class="f"><span>类别</span><select id="rqCategory"><option>业务需求</option><option>功能需求</option><option>非功能需求</option><option>合规需求</option><option>其他</option></select></label>
+    <label class="f"><span>优先级</span><select id="rqPriority"><option value="high">高</option><option value="medium" selected>中</option><option value="low">低</option></select></label>
+    <label class="f"><span>状态</span><select id="rqStatus"><option value="pending">待分析</option><option value="analyzed">已分析</option><option value="approved">已确认</option><option value="rejected">已放弃</option></select></label>
+    <label class="f"><span>来源</span><input id="rqSource" placeholder="如 招标文件 / 客户访谈 / 会议纪要"></label>
+    <label class="f"><span>关联知识库</span><input id="rqKb" placeholder="可填写知识库素材名称，选填"></label>
+  </div>
+  <label class="f"><span>需求描述</span><textarea id="rqDesc" rows="3"></textarea></label>
+  <label class="f"><span>分析结论 / 应对方案</span><textarea id="rqAnalysis" rows="3"></textarea></label>
+  <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mRequirement')">取消</button>
+  <button class="btn" style="margin-left:10px" onclick="saveRequirement()">保存</button></div>
 </div></div>
 
 <div class="toast" id="toast"></div>

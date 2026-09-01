@@ -29,8 +29,19 @@ const HEALTH_TTL_MS = Number(process.env.HEALTH_TTL_MS || 15000)
 const WEKNORA_TIMEOUT_MS = Number(process.env.WEKNORA_TIMEOUT_MS || 30000)
 const HERMES_TIMEOUT_MS = Number(process.env.HERMES_TIMEOUT_MS || 20000)
 const DATA_DIR = process.env.DATA_DIR || '/opt/presales-workbench/data'
+const FILE_DIR = path.join(DATA_DIR, 'files')
+const FILES_INDEX = path.join(DATA_DIR, 'files-index.json')
 
 let _healthCache = { at: 0, data: null }
+let _filesIndex = (() => {
+  try { return JSON.parse(fs.readFileSync(FILES_INDEX, 'utf8') || '{}') } catch (_) { return {} }
+})()
+function saveFilesIndex() {
+  try {
+    fs.mkdirSync(path.dirname(FILES_INDEX), { recursive: true })
+    fs.writeFileSync(FILES_INDEX, JSON.stringify(_filesIndex, null, 2), 'utf8')
+  } catch (e) { log('保存 files-index 失败:', e && e.message) }
+}
 
 function fetchWithTimeout(url, opts = {}, ms = HERMES_TIMEOUT_MS) {
   const ac = new AbortController()
@@ -372,6 +383,71 @@ async function handleCatMapPut(req, res) {
   return sendJson(res, 200, { ok: true, docId, catId })
 }
 
+/* ---------------- 通用文件上传/下载（Excel、合同附件等二进制文件） ---------------- */
+async function handleFileUpload(req, res) {
+  const MAX_FILE = 50 * 1024 * 1024 // 50MB
+  let name = ''
+  let buf
+  try {
+    name = decodeURIComponent(String(req.headers['x-filename'] || '').trim())
+    buf = await readRaw(req, MAX_FILE)
+  } catch (e) {
+    return sendJson(res, 413, { error: '文件过大或上传失败：' + e.message })
+  }
+  if (!name) return sendJson(res, 400, { error: '缺少文件名' })
+  if (!buf || !buf.length) return sendJson(res, 400, { error: '文件内容为空' })
+  const fileId = uid() + path.extname(name).toLowerCase()
+  const filePath = path.join(FILE_DIR, fileId)
+  try {
+    fs.mkdirSync(FILE_DIR, { recursive: true })
+    fs.writeFileSync(filePath, buf)
+    _filesIndex[fileId] = { name, size: buf.length, mime: mimeFromName(name), created: new Date().toISOString() }
+    saveFilesIndex()
+    return sendJson(res, 200, { ok: true, fileId, name, size: buf.length })
+  } catch (e) {
+    log('保存上传文件失败:', e && e.message)
+    return sendJson(res, 500, { error: '保存文件失败：' + e.message })
+  }
+}
+function mimeFromName(name) {
+  const ext = path.extname(name).toLowerCase()
+  const map = {
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.xls': 'application/vnd.ms-excel',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.doc': 'application/msword',
+    '.pdf': 'application/pdf',
+    '.zip': 'application/zip',
+    '.txt': 'text/plain; charset=utf-8',
+  }
+  return map[ext] || 'application/octet-stream'
+}
+async function handleFileDownload(req, res, fileId) {
+  if (!fileId) return sendJson(res, 400, { error: '缺少文件 ID' })
+  const meta = _filesIndex[fileId]
+  const filePath = path.join(FILE_DIR, fileId)
+  try {
+    const buf = fs.readFileSync(filePath)
+    res.writeHead(200, {
+      'content-type': meta && meta.mime ? meta.mime : 'application/octet-stream',
+      'content-length': buf.length,
+      'content-disposition': `attachment; filename="${encodeURIComponent(meta && meta.name ? meta.name : fileId)}"`,
+    })
+    res.end(buf)
+  } catch (e) {
+    return sendJson(res, 404, { error: '文件不存在或已删除' })
+  }
+}
+async function handleFileDelete(req, res, fileId) {
+  if (!fileId) return sendJson(res, 400, { error: '缺少文件 ID' })
+  const filePath = path.join(FILE_DIR, fileId)
+  try { fs.unlinkSync(filePath) } catch (_) {}
+  delete _filesIndex[fileId]
+  saveFilesIndex()
+  return sendJson(res, 200, { ok: true, fileId })
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 9) }
+
 /* ---------------- 健康检查（带 TTL 缓存，避免前端每 60s 轮询都打外部依赖） ---------------- */
 async function handleHealth(req, res) {
   if (Date.now() - _healthCache.at < HEALTH_TTL_MS && _healthCache.data) {
@@ -413,6 +489,15 @@ const server = http.createServer(async (req, res) => {
     if (url.startsWith('/api/sessions') && req.method === 'GET') return void (await handleSessions(req, res))
     if (url.startsWith('/api/session/attach') && req.method === 'POST') return void (await handleAttach(req, res))
     if (url.startsWith('/api/health')) return void (await handleHealth(req, res))
+
+    /* 通用文件上传/下载 */
+    if (url === '/api/files/upload' && req.method === 'POST') return void (await handleFileUpload(req, res))
+    if (url.startsWith('/api/files/download/') && req.method === 'GET') {
+      return void (await handleFileDownload(req, res, decodeURIComponent(url.slice('/api/files/download/'.length).split('?')[0])))
+    }
+    if (url.startsWith('/api/files/') && req.method === 'DELETE') {
+      return void (await handleFileDelete(req, res, decodeURIComponent(url.slice('/api/files/'.length).split('?')[0])))
+    }
 
     /* WeKnora 代理：前端通过 BFF 间接访问 WeKnora，避免暴露 API Key 与 8080 端口 */
     if (url.startsWith('/api/weknora/knowledge-base') && req.method === 'GET') {
