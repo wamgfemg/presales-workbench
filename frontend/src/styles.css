@@ -243,3 +243,22 @@ tr:hover td{background:#f8faff}
 .qi-ico{cursor:pointer;font-size:16px;padding:2px 6px}
 .qi-auto{border:1px solid var(--line);border-radius:20px;padding:4px 12px;font-size:12px;cursor:pointer}
 .qi-send{width:34px;height:34px;border-radius:50%;background:#141a2f;color:#fff;border:0;cursor:pointer;font-size:15px;flex-shrink:0}
+/* ===== 决策链（三期） ===== */
+.chain-cov{background:#f8fafd;border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer}
+.chain-cov.full{border-left-color:var(--ok)}
+.chain-cov.lack{border-left-color:var(--bad)}
+.chain-cov:hover{box-shadow:var(--shadow)}
+.chain-flow{display:flex;gap:12px;overflow-x:auto;padding-bottom:6px;align-items:flex-start}
+.chain-role{min-width:210px;flex:0 0 210px;background:#f8fafd;border:1px dashed var(--line);border-radius:12px;padding:10px}
+.chain-role.gap{background:#fff8f8;border-color:#f3c6ce}
+.chain-role .rname{font-size:12px;font-weight:700;color:var(--sub);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.chain-role .rname .must{font-style:normal;font-size:10px;background:#eef1f8;color:#6b7488;border-radius:8px;padding:1px 6px}
+.chain-person{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.chain-person.gap{background:transparent;border-style:dashed;color:var(--sub);font-size:12px}
+.chain-person .pn{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13.5px}
+.chain-person .pt{font-size:12px;color:var(--sub);margin-top:2px}
+.chain-person .pk{font-size:12px;margin-top:6px;line-height:1.6}
+.chain-person .pk span{display:inline-block;font-size:10px;color:#6b7488;background:#eef1f8;border-radius:6px;padding:0 5px;margin-right:4px}
+.chain-person .pk.st{color:#1c5ed8}
+.chain-person .pk.st span{background:#e7f0ff;color:#1c5ed8}
+.chain-person .pa{margin-top:8px;display:flex;gap:6px}

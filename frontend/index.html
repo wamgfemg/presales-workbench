@@ -21,6 +21,7 @@
       <button data-p="c139"><span class="ico">🎯</span>C139 赢单评估</button>
       <button data-p="tools"><span class="ico">🧰</span>投标工具箱</button>
       <button data-p="stakeholders"><span class="ico">🧑‍🤝‍🧑</span>干系人管理</button>
+      <button data-p="chain"><span class="ico">🧭</span>决策链</button>
       <button data-p="contracts"><span class="ico">📋</span>合同管理</button>
       <button data-p="quotations"><span class="ico">💰</span>报价管理</button>
       <button data-p="compintel"><span class="ico">🕵️</span>竞争情报</button>
@@ -175,6 +176,12 @@
       <div id="stkBody"></div>
     </section>
 
+    <!-- ============ 决策链（三期） ============ -->
+    <section class="page" id="p-chain">
+      <div class="page-head"><div><h2>决策链</h2><div class="desc">关键决策人阵型 · 角色覆盖缺口 · 跨项目人员台账</div></div></div>
+      <div id="chainBody"></div>
+    </section>
+
     <!-- ============ 合同管理 ============ -->
     <section class="page" id="p-contracts">
       <div class="page-head"><div><h2>合同管理</h2><div class="desc">记录项目合同关键信息并归档合同附件</div></div>
@@ -302,17 +309,19 @@
 <div class="mask" id="mStakeholder"><div class="modal">
   <h3><span id="stkModalTitle">新增干系人</span><button class="x" onclick="closeMask('mStakeholder')">✕</button></h3>
   <input type="hidden" id="stkId">
+  <input type="hidden" id="stkPid">
   <div class="grid g2">
     <label class="f"><span>姓名 *</span><input id="stkName"></label>
     <label class="f"><span>职务/岗位</span><input id="stkTitle"></label>
     <label class="f"><span>部门</span><input id="stkDept"></label>
-    <label class="f"><span>角色</span><select id="stkRole"><option value="">— 请选择 —</option><option>决策者</option><option>技术把关</option><option>使用方</option><option>教练</option><option>影响者</option><option>其他</option></select></label>
+    <label class="f"><span>角色</span><select id="stkRole"><option value="">— 请选择 —</option><option>决策者</option><option>最终审批人</option><option>技术负责人</option><option>采购负责人</option><option>使用部门</option><option>教练/内线</option><option>影响者</option><option>其他</option></select></label>
     <label class="f"><span>影响力</span><select id="stkInfluence"><option value="high">高</option><option value="medium" selected>中</option><option value="low">低</option></select></label>
-    <label class="f"><span>态度倾向</span><select id="stkAttitude"><option value="support">支持</option><option value="neutral" selected>中立</option><option value="oppose">反对</option></select></label>
+    <label class="f"><span>态度倾向</span><select id="stkAttitude"><option value="support">支持</option><option value="neutral" selected>中立</option><option value="oppose">反对</option><option value="unknown">未知</option></select></label>
     <label class="f"><span>联系电话</span><input id="stkPhone"></label>
     <label class="f"><span>邮箱</span><input id="stkEmail"></label>
   </div>
   <label class="f"><span>关注重点/诉求</span><textarea id="stkFocus" rows="2"></textarea></label>
+  <label class="f"><span>我方策略（如何经营这个人）</span><textarea id="stkStrategy" rows="2" placeholder="如：通过王主任安排与副局长首次汇报，主打自主可控与运维成本"></textarea></label>
   <label class="f"><span>备注</span><textarea id="stkNotes" rows="2"></textarea></label>
   <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mStakeholder')">取消</button>
   <button class="btn" style="margin-left:10px" onclick="saveStakeholder()">保存</button></div>
