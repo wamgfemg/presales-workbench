@@ -1,8 +1,8 @@
 
 /* ================= 数据层 ================= */
-const LS_KEY='presales_workbench_v2';
+const LS_KEY='presales_workbench_v3';
 let store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
-  stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{}};
+  stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{}};
 let editingProjectId=null, currentProjectId=null, kbEditingId=null;
 
 const DEF_CATS=['产品资料','案例库','技术方案素材','公司资质与实力','竞品情报','话术与FAQ','模板与规范'];
@@ -25,12 +25,14 @@ function load(){try{const s=localStorage.getItem(LS_KEY);if(s)store=JSON.parse(s
   if(!store.quotations)store.quotations={};
   if(!store.compintel)store.compintel=[];
   if(!store.requirements)store.requirements={};
+  if(!store.followups)store.followups={};
   if(!store.kbTree||!store.kbTree.length){
     store.kbTree=DEF_CATS.map(n=>({id:uid(),name:n,pid:null}));
     store.kb.forEach(k=>{if(k.category!==undefined){const n=store.kbTree.find(t=>t.name===k.category);k.catId=n?n.id:null;delete k.category}});
   }}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
-function today(){return new Date().toISOString().slice(0,10)}
+function fmtDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function today(){return fmtDate(new Date())}
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',2200)}
 
@@ -175,8 +177,8 @@ function renderDetail(){
     return `<div class="step ${cls}"><div class="dot">${i<ci?'✓':i+1}</div>${st}</div>`}).join('')+
     (lost?`<div class="step cur"><div class="dot" style="background:var(--bad);color:#fff">✕</div>${p.stage}</div>`:'');
   document.querySelectorAll('#dtTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===dtTab));
-  document.getElementById('dtBody').innerHTML=({renderDtInfo,renderDtTask,renderDtTl,renderDtC139,renderDtDoc,renderDtStk,renderDtContract})[
-    {info:'renderDtInfo',task:'renderDtTask',tl:'renderDtTl',c:'renderDtC139',doc:'renderDtDoc',stk:'renderDtStk',contract:'renderDtContract'}[dtTab]](p);
+  document.getElementById('dtBody').innerHTML=({renderDtInfo,renderDtFollow,renderDtPlan,renderDtRisk,renderDtTask,renderDtTl,renderDtC139,renderDtDoc,renderDtStk,renderDtContract})[
+    {info:'renderDtInfo',fu:'renderDtFollow',plan:'renderDtPlan',risk:'renderDtRisk',task:'renderDtTask',tl:'renderDtTl',c:'renderDtC139',doc:'renderDtDoc',stk:'renderDtStk',contract:'renderDtContract'}[dtTab]](p);
 }
 document.getElementById('dtTabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b){dtTab=b.dataset.t;renderDetail()}});
 
@@ -932,10 +934,14 @@ function renderDash(){
   const profitSum=won.reduce((s,p)=>s+marginOf(p).profit,0);
   const winRate=(won.length+lost.length)?Math.round(won.length/(won.length+lost.length)*100):0;
   const avgRate=active.length?Math.round(active.reduce((s,p)=>s+c139Stats(p.c139).rate,0)/active.length):0;
+  const steps=allOpenSteps(), risks=allOpenRisks();
+  const overSteps=steps.filter(s=>dueState(s.due)==='over').length;
+  const highRisk=risks.filter(r=>r.level==='高').length;
   document.getElementById('dashKpis').innerHTML=[
     ['在跟项目',active.length,'个'],['预估总额',fmtWan(Math.round(estSum*10)/10),'万'],
     ['加权金额',fmtWan(Math.round(wgtSum*10)/10),'万'],['已中标合同额',fmtWan(Math.round(wonSum*10)/10),'万'],
-    ['已中标毛利',fmtWan(Math.round(profitSum*10)/10),'万'],['中标率',winRate,'%'],['平均赢单率',avgRate,'%']
+    ['已中标毛利',fmtWan(Math.round(profitSum*10)/10),'万'],['中标率',winRate,'%'],['平均赢单率',avgRate,'%'],
+    ['逾期下一步',overSteps,'项'],['高风险未关闭',highRisk,'项']
   ].map(k=>`<div class="kpi"><div class="lb">${k[0]}</div><div class="num">${k[1]}<small style="font-size:12px;font-weight:400"> ${k[2]}</small></div><div class="lb">&nbsp;</div></div>`).join('');
   const stages=['前期交流','方案阶段','招投标阶段','已中标','已流标','已输标','项目已取消'];
   const max=Math.max(1,...stages.map(s=>ps.filter(p=>p.stage===s).length));
@@ -945,6 +951,16 @@ function renderDash(){
   const lvHtml=OPP_LEVELS.map(l=>`<span class="tag" style="margin:2px 8px 2px 0">${l} · ${active.filter(p=>p.oppLevel===l).length}</span>`).join('');
   document.getElementById('dashFunnel').innerHTML=funnelHtml+
     `<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px;font-size:12px;color:var(--sub)">在跟项目商机级别：${lvHtml||'—'}</div>`;
+  document.getElementById('dashNext').innerHTML=steps.length?'<table>'+steps.slice(0,8).map(s=>{const st=dueState(s.due);
+    return `<tr><td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${s.pid}')">${esc(s.what)}</b><br><small style="color:var(--sub)">${esc(s.pname)}${s.owner?' · '+esc(s.owner):''}</small></td>
+    <td style="text-align:right;white-space:nowrap"><span class="pct" style="color:${dueColor(st)};font-weight:700">${esc(s.due)}</span> <span class="tag" style="color:${dueColor(st)}">${st==='over'?'逾期':'临期'}</span></td></tr>`}).join('')+'</table>'
+    +'<div class="hint" style="margin-top:8px">共 '+steps.length+' 项逾期或本周到期</div>'
+    :'<div class="empty">没有逾期或本周到期的下一步</div>';
+  document.getElementById('dashRisk').innerHTML=risks.length?'<table>'+risks.slice(0,8).map(r=>
+    `<tr><td style="width:44px;text-align:center"><b style="color:${levelColor(r.level)};font-size:15px">${esc(r.level)}</b><br><small style="color:var(--sub)">${esc(r.kind)}</small></td>
+     <td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${r.pid}')">${esc(r.desc)}</b><br><small style="color:var(--sub)">${esc(r.pname)} · ${esc(r.status)}${r.owner?' · '+esc(r.owner):''}</small></td></tr>`).join('')+'</table>'
+    +'<div class="hint" style="margin-top:8px">共 '+risks.length+' 项未关闭（高 '+highRisk+' 项）</div>'
+    :'<div class="empty">暂无未关闭的风险与问题</div>';
   const top=[...active].sort((a,b)=>c139Stats(b.c139).rate-c139Stats(a.c139).rate).slice(0,6);
   document.getElementById('dashTop').innerHTML=top.length?'<table>'+top.map(p=>{const s=c139Stats(p.c139);return `<tr><td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${p.id}')">${esc(p.name)}</b><br><small style="color:var(--sub)">${esc(p.customer)}</small></td>
     <td style="text-align:right"><span class="pct" style="font-weight:700;color:${s.rate>=85?'var(--ok)':s.rate>=50?'#b25e0c':'var(--bad)'}">${s.rate}%</span> ${zoneBadge(s.zone)}</td></tr>`}).join('')+'</table>'
@@ -954,8 +970,127 @@ function renderDash(){
   document.getElementById('dashRecent').innerHTML=events.slice(0,8).map(e=>`<div class="tl-item"><div class="d">${esc(e.d)}</div><div class="t"><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${e.id}')">${esc(e.pname)}</b> · ${esc(e.t)}</div></div>`).join('')||'<div class="empty">暂无动态</div>';
 }
 
+/* ================= 二期：跟进记录 / 下一步计划 / 风险与问题 ================= */
+const FOLLOW_WAYS=['电话','微信','拜访','会议','邮件','其他'];
+const RISK_KINDS=['风险','问题'];
+const RISK_LEVELS=['高','中','低'];
+const RISK_STATUS=['开放','跟踪中','已缓解','已关闭'];
+const SOON_DAYS=7;   // 「本周到期」窗口
+function addDays(s,n){const d=new Date(s+'T00:00:00');d.setDate(d.getDate()+n);return fmtDate(d)}
+function dueState(d){if(!d)return '';if(d<today())return 'over';if(d<=addDays(today(),SOON_DAYS))return 'soon';return ''}
+function dueColor(st){return st==='over'?'var(--bad)':st==='soon'?'#b25e0c':'var(--sub)'}
+function fuList(pid){return store.followups[pid]=store.followups[pid]||[]}
+function levelColor(l){return l==='高'?'var(--bad)':l==='中'?'#b25e0c':'var(--sub)'}
+
+function renderDtFollow(p){
+  const list=[...fuList(p.id)].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  return `<div class="card"><h3>跟进与沟通记录</h3>
+    <div class="grid g4">
+      <label class="f"><span>跟进时间</span><input id="fuDate" type="date" value="${today()}"></label>
+      <label class="f"><span>沟通方式</span><select id="fuWay">${FOLLOW_WAYS.map(w=>`<option>${w}</option>`).join('')}</select></label>
+      <label class="f"><span>跟进人</span><input id="fuBy" value="${esc(p.presales||p.sales||'')}"></label>
+      <label class="f"><span>下次跟进</span><input id="fuNext" type="date"></label></div>
+    <div style="display:flex;gap:8px"><input id="fuContent" placeholder="沟通核心内容：对方反馈、承诺、分歧、达成的下一步…" onkeydown="if(event.key==='Enter')fuAdd()">
+    <button class="btn" onclick="fuAdd()">记录</button></div>
+    ${list.length?`<div style="overflow-x:auto"><table style="margin-top:12px"><tr><th style="width:100px">时间</th><th style="width:70px">方式</th><th style="width:80px">跟进人</th><th>核心内容</th><th style="width:100px">下次跟进</th><th style="width:46px"></th></tr>`+
+      list.map(f=>{const st=dueState(f.next);return `<tr><td>${esc(f.date)}</td><td><span class="tag">${esc(f.way)}</span></td><td>${esc(f.by||'—')}</td>
+      <td>${esc(f.content)}</td><td>${f.next?`<span style="color:${dueColor(st)}">${esc(f.next)}${st==='over'?' 逾期':''}</span>`:'—'}</td>
+      <td><button class="btn sm danger" onclick="fuDel('${f.id}')">✕</button></td></tr>`}).join('')+'</table></div>'
+      :'<div class="empty" style="margin-top:12px">暂无跟进记录</div>'}
+    <div class="hint" style="margin-top:10px">每条跟进会自动写入项目时间线，首页「最近动态」同步可见；填了「下次跟进」日期会进首页待办提醒。</div></div>`;
+}
+function fuAdd(){
+  const c=document.getElementById('fuContent').value.trim();if(!c){toast('请填写沟通核心内容');return}
+  const p=getProj();const way=document.getElementById('fuWay').value;
+  const f={id:uid(),date:document.getElementById('fuDate').value||today(),way,by:document.getElementById('fuBy').value.trim(),
+    content:c,next:document.getElementById('fuNext').value||''};
+  fuList(p.id).push(f);addTl(p,'跟进（'+way+'）：'+c.slice(0,40));persist();renderDetail();toast('已记录跟进')
+}
+function fuDel(id){const p=getProj();store.followups[p.id]=fuList(p.id).filter(x=>x.id!==id);persist();renderDetail()}
+
+function renderDtPlan(p){
+  p.nextSteps=p.nextSteps||[];
+  const open=p.nextSteps.filter(s=>!s.done).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999'));
+  const done=p.nextSteps.filter(s=>s.done);
+  const rows=list=>list.map(s=>{const i=p.nextSteps.indexOf(s),st=s.due?dueState(s.due):'';
+    return `<div class="task ${s.done?'done':''}"><input type="checkbox" ${s.done?'checked':''} onchange="stepToggle(${i})">
+      <span style="flex:1">${esc(s.what)}${s.owner?`<small style="color:var(--sub)"> · ${esc(s.owner)}</small>`:''}</span>
+      <span class="tag" style="color:${dueColor(st)};white-space:nowrap">${esc(s.due||'未定')}${st==='over'?' 逾期':st==='soon'?' 临期':''}</span>
+      <button class="btn sm danger" onclick="stepDel(${i})">✕</button></div>`}).join('');
+  return `<div class="card"><h3>下一步计划</h3>
+    <div class="grid g4">
+      <label class="f"><span>事项</span><input id="nsWhat" placeholder="如：约科技处做方案澄清" onkeydown="if(event.key==='Enter')stepAdd()"></label>
+      <label class="f"><span>责任人</span><input id="nsOwner" value="${esc(p.presales||p.sales||'')}"></label>
+      <label class="f"><span>截止日期</span><input id="nsDue" type="date" value="${addDays(today(),SOON_DAYS)}"></label>
+      <label class="f"><span>&nbsp;</span><button class="btn" onclick="stepAdd()">＋ 添加下一步</button></label></div>
+    <div style="margin-top:6px">${rows(open)||'<div class="empty">暂无未完成的下一步</div>'}</div>
+    ${done.length?`<div class="hint" style="margin-top:10px">已完成 ${done.length} 项</div>${rows(done)}`:''}
+    <div class="hint" style="margin-top:12px">与「推进计划与任务」的分工：那里是阶段标准动作清单，这里是带责任人和截止日的具体待办，逾期与本周到期会进首页预警。</div></div>`;
+}
+function stepAdd(){
+  const w=document.getElementById('nsWhat').value.trim();if(!w){toast('请填写事项');return}
+  const p=getProj();p.nextSteps=p.nextSteps||[];
+  p.nextSteps.push({id:uid(),what:w,owner:document.getElementById('nsOwner').value.trim(),due:document.getElementById('nsDue').value||'',done:false});
+  addTl(p,'新增下一步：'+w);persist();renderDetail()
+}
+function stepToggle(i){const p=getProj();const s=(p.nextSteps||[])[i];if(!s)return;s.done=!s.done;
+  addTl(p,(s.done?'完成下一步：':'重新打开下一步：')+s.what);persist();renderDetail()}
+function stepDel(i){const p=getProj();p.nextSteps.splice(i,1);persist();renderDetail()}
+
+function renderDtRisk(p){
+  p.risks=p.risks||[];
+  const open=p.risks.filter(r=>r.status!=='已关闭').sort((a,b)=>RISK_LEVELS.indexOf(a.level)-RISK_LEVELS.indexOf(b.level));
+  const closed=p.risks.filter(r=>r.status==='已关闭');
+  const rows=list=>list.length?`<div style="overflow-x:auto"><table><tr><th style="width:56px">类型</th><th style="width:48px">等级</th><th>风险 / 问题描述</th><th style="width:80px">责任人</th><th style="width:104px">状态</th><th style="width:46px"></th></tr>`+
+    list.map(r=>{const i=p.risks.indexOf(r);return `<tr><td><span class="tag">${esc(r.kind)}</span></td>
+      <td><b style="color:${levelColor(r.level)}">${esc(r.level)}</b></td>
+      <td>${esc(r.desc)}${r.mitigation?`<br><small style="color:var(--sub)">应对：${esc(r.mitigation)}</small>`:''}<br><small style="color:var(--sub)">发现 ${esc(r.found||'—')}</small></td>
+      <td>${esc(r.owner||'—')}</td>
+      <td><select onchange="riskSet(${i},'status',this.value)" style="padding:3px 6px">${RISK_STATUS.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select></td>
+      <td><button class="btn sm danger" onclick="riskDel(${i})">✕</button></td></tr>`}).join('')+'</table></div>':'';
+  return `<div class="card"><h3>风险与问题管理</h3>
+    <div class="grid g4">
+      <label class="f"><span>类型</span><select id="rkKind">${RISK_KINDS.map(k=>`<option>${k}</option>`).join('')}</select></label>
+      <label class="f"><span>等级</span><select id="rkLevel">${RISK_LEVELS.map((l,i)=>`<option ${i===1?'selected':''}>${l}</option>`).join('')}</select></label>
+      <label class="f"><span>责任人</span><input id="rkOwner" value="${esc(p.presales||p.sales||'')}"></label>
+      <label class="f"><span>应对措施（可选）</span><input id="rkMit" placeholder="如：提前锁定答疑澄清窗口"></label></div>
+    <div style="display:flex;gap:8px"><input id="rkDesc" placeholder="风险 / 问题描述，如：客户预算尚未批复，招标可能延后" onkeydown="if(event.key==='Enter')riskAdd()">
+    <button class="btn" onclick="riskAdd()">＋ 登记</button></div>
+    <div style="margin-top:12px">${rows(open)||'<div class="empty">暂无未关闭的风险与问题</div>'}</div>
+    ${closed.length?`<div class="hint" style="margin-top:10px">已关闭 ${closed.length} 项</div>${rows(closed)}`:''}
+    ${p.lostReason?`<div style="margin-top:12px;color:var(--bad)"><b>${esc(p.stage)}原因（已归档）：</b>${esc(p.lostReason)}</div>`:''}
+    <div class="hint" style="margin-top:10px">高等级且未关闭的风险会进首页预警；项目进入流标/输标/取消时，原因在「基本信息」里单独归档留存。</div></div>`;
+}
+function riskAdd(){
+  const d=document.getElementById('rkDesc').value.trim();if(!d){toast('请填写风险或问题描述');return}
+  const p=getProj();p.risks=p.risks||[];
+  const kind=document.getElementById('rkKind').value, level=document.getElementById('rkLevel').value;
+  p.risks.push({id:uid(),kind,level,desc:d,owner:document.getElementById('rkOwner').value.trim(),
+    mitigation:document.getElementById('rkMit').value.trim(),status:'开放',found:today()});
+  addTl(p,'登记'+kind+'（'+level+'）：'+d.slice(0,40));persist();renderDetail();toast('已登记')
+}
+function riskSet(i,f,v){const p=getProj();const r=(p.risks||[])[i];if(!r)return;r[f]=v;
+  if(f==='status')addTl(p,'风险状态→'+v+'：'+r.desc.slice(0,30));persist();renderDetail()}
+function riskDel(i){const p=getProj();p.risks.splice(i,1);persist();renderDetail()}
+
+/* 汇总给首页预警用 */
+function allOpenSteps(){const a=[];store.projects.forEach(p=>(p.nextSteps||[]).forEach(s=>{
+  if(!s.done&&s.due&&s.due<=addDays(today(),SOON_DAYS))a.push(Object.assign({},s,{pid:p.id,pname:p.name}))}));
+  return a.sort((x,y)=>x.due.localeCompare(y.due))}
+function allOpenRisks(){const a=[];store.projects.forEach(p=>(p.risks||[]).forEach(r=>{
+  if(r.status!=='已关闭')a.push(Object.assign({},r,{pid:p.id,pname:p.name}))}));
+  return a.sort((x,y)=>RISK_LEVELS.indexOf(x.level)-RISK_LEVELS.indexOf(y.level))}
+
 /* ================= 数据备份 ================= */
 function exportAll(){download('售前工作台数据备份-'+today()+'.json',JSON.stringify(store,null,2),'application/json');toast('已导出备份文件')}
+function resetDemo(){
+  if(!confirm('重置为演示数据？当前服务器与本机的工作数据将被覆盖。'))return;
+  store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
+    stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{}};
+  _sent={};_rev={};
+  seed();persist();
+  pushImportToServer().then(function(){show('dash');renderDash();renderProjects();toast('已重置为演示数据')});
+}
 function importAll(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{store=JSON.parse(r.result);persist();show('dash');toast('导入成功');pushImportToServer()}catch(e){toast('文件格式错误')}};r.readAsText(f);inp.value=''}
 
 /* ================= 通用页面项目选择器 ================= */
@@ -1408,6 +1543,34 @@ function seed(){
       [150,90,0,0],['2026-11','',''],
       C(),{lostReason:'客户预算削减，项目推迟至下一财政年度',progressText:'保持联系，明年初预算恢复后重新立项。'})
   ];
+  const P=id=>store.projects.find(x=>x.id===id);
+  P('p1').nextSteps=[
+    {id:uid(),what:'确认答疑澄清提交窗口与偏离表口径',owner:'王强',due:addDays(today(),-1),done:false},
+    {id:uid(),what:'完成投标技术标编制并内部评审',owner:'李晓峰',due:addDays(today(),2),done:false},
+    {id:uid(),what:'拉通原厂报价，锁定成本红线',owner:'王强',due:addDays(today(),3),done:false},
+    {id:uid(),what:'述标PPT初稿与答辩分工',owner:'李晓峰',due:addDays(today(),5),done:false}];
+  P('p1').risks=[
+    {id:uid(),kind:'风险',level:'高',desc:'B公司可能以低于成本价搅局，商务分被拉开',owner:'王强',mitigation:'申请价格评审策略；用五年 TCO 对比强化我方技术分权重',status:'开放',found:today()},
+    {id:uid(),kind:'问题',level:'中',desc:'客户 RPO≤15 分钟硬性指标与我方标准双活方案存在差距',owner:'李晓峰',mitigation:'与研发确认改造工作量，本周给出书面答复',status:'跟踪中',found:today()}];
+  P('p2').nextSteps=[
+    {id:uid(),what:'向信息科技部汇报升级方案（分期建设路径）',owner:'陈晨',due:addDays(today(),4),done:false},
+    {id:uid(),what:'通过教练摸清竞品报价区间',owner:'王强',due:addDays(today(),10),done:false}];
+  P('p2').risks=[
+    {id:uid(),kind:'风险',level:'高',desc:'客户预算仍在财政评审，项目可能延后一个季度',owner:'王强',mitigation:'推动科技部门先出技术选型报告，锁定立项节奏',status:'开放',found:today()}];
+  P('p3').nextSteps=[
+    {id:uid(),what:'交付启动会，确认里程碑与回款节点',owner:'张磊',due:addDays(today(),6),done:false}];
+  P('p3').risks=[
+    {id:uid(),kind:'风险',level:'低',desc:'硬件到货周期受产能影响，可能压缩实施窗口',owner:'张磊',mitigation:'合同约定到货节点，提前两周预警',status:'跟踪中',found:today()}];
+  P('p5').risks=[
+    {id:uid(),kind:'问题',level:'中',desc:'报价策略偏保守，商务分差距过大',owner:'张磊',mitigation:'复盘结论入知识库，同类项目预设三档报价',status:'已关闭',found:today()}];
+  store.followups={
+    p1:[{id:uid(),date:addDays(today(),-2),way:'会议',by:'李晓峰',content:'招标答疑预沟通：科技处确认 RPO≤15 分钟为硬性指标，接受双活方案；建议偏离表逐条响应，避免被判定负偏离。',next:addDays(today(),3)},
+        {id:uid(),date:addDays(today(),-9),way:'拜访',by:'王强',content:'拜访运营管理部：一期同城灾备实际利用率不足 40%，客户希望异地方案兼顾开发测试环境复用。',next:''}],
+    p2:[{id:uid(),date:addDays(today(),-5),way:'电话',by:'陈晨',content:'信息科技部反馈预算仍在财政评审，需等 10 月批复；建议方案给出分期建设路径，先上一期核心模块。',next:addDays(today(),4)}],
+    p3:[{id:uid(),date:addDays(today(),-20),way:'邮件',by:'张磊',content:'发送中标通知书回执与合同文本，确认 8/16 签约，付款 3:6:1。',next:''}],
+    p4:[{id:uid(),date:addDays(today(),-12),way:'拜访',by:'陈晨',content:'首次交流：管委会关注招商与能耗管理，信息化科无独立预算，需挂靠年度专项。',next:''}
+  ]
+  };
   store.tasks=[{id:'t1',projectId:'p3',type:'first',title:'某市政务云二期建设整体思路交流',autoTitle:true,status:'chat',qIndex:1,created:today(),ts:Date.now()-22e5,draft:null,
     answers:{theme:'某市政务云二期建设整体思路交流'},
     msgs:[
@@ -1461,8 +1624,8 @@ function seed(){
  * 覆盖库之前会把本机全量快照存进 localStorage['presales_workbench_v1_legacy']（每会话一次），防误覆盖。
  * rev 冲突（拉到数据与写回之间同事又改了）→ 提示后强制覆盖，服务器 rev +1。
  */
-var SYNC_COLLECTIONS=['projects','kb','docs','tasks','kbTree','pdocs','checklists','stakeholders','contracts','quotations','compintel','requirements'];
-var SYNC_LABEL={projects:'项目',kb:'知识库',docs:'方案文档',tasks:'任务',kbTree:'知识库目录',pdocs:'项目资料',checklists:'检查清单',stakeholders:'干系人',contracts:'合同',quotations:'报价',compintel:'竞争情报',requirements:'需求'};
+var SYNC_COLLECTIONS=['projects','kb','docs','tasks','kbTree','pdocs','checklists','stakeholders','contracts','quotations','compintel','requirements','followups'];
+var SYNC_LABEL={projects:'项目',kb:'知识库',docs:'方案文档',tasks:'任务',kbTree:'知识库目录',pdocs:'项目资料',checklists:'检查清单',stakeholders:'干系人',contracts:'合同',quotations:'报价',compintel:'竞争情报',requirements:'需求',followups:'跟进记录'};
 var SYNC_POLL_MS=60000;
 var _rev={}, _sent={}, _online=false, _lastErr='', _pushTimer=null, _pushing=false, _pushAgain=false, _legacyGuard=false;
 // 浏览器实例标识：无鉴权场景下写进库的 updated_by，出问题时能区分是哪台机器写的

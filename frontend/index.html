@@ -31,6 +31,7 @@
       <button onclick="exportAll()">⬇ 导出数据备份</button>
       <button onclick="document.getElementById('importFile').click()">⬆ 导入数据</button>
       <button onclick="syncNow()">⟳ 立即同步</button>
+      <button onclick="resetDemo()">↺ 重置演示数据</button>
       <input type="file" id="importFile" accept=".json" style="display:none" onchange="importAll(this)">
     </div>
   </aside>
@@ -44,6 +45,10 @@
       <div class="grid g2">
         <div class="card"><h3>项目阶段漏斗</h3><div id="dashFunnel"></div></div>
         <div class="card"><h3>赢单率 TOP 项目（C139）</h3><div id="dashTop"></div></div>
+      </div>
+      <div class="grid g2">
+        <div class="card"><h3>下一步（逾期 / 本周到期）</h3><div id="dashNext"></div></div>
+        <div class="card"><h3>未关闭的风险与问题</h3><div id="dashRisk"></div></div>
       </div>
       <div class="card"><h3>最近动态</h3><div id="dashRecent"></div></div>
     </section>
@@ -83,6 +88,9 @@
       <div class="card"><div class="step-flow" id="dtFlow"></div></div>
       <div class="tabs" id="dtTabs">
         <button class="on" data-t="info">基本信息与背景收集</button>
+        <button data-t="fu">跟进记录</button>
+        <button data-t="plan">下一步计划</button>
+        <button data-t="risk">风险与问题</button>
         <button data-t="task">推进计划与任务</button>
         <button data-t="tl">时间线</button>
         <button data-t="c">C139 快评</button>
