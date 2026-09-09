@@ -1,11 +1,19 @@
 
 /* ================= 数据层 ================= */
-const LS_KEY='presales_workbench_v1';
+const LS_KEY='presales_workbench_v2';
 let store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
   stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{}};
 let editingProjectId=null, currentProjectId=null, kbEditingId=null;
 
 const DEF_CATS=['产品资料','案例库','技术方案素材','公司资质与实力','竞品情报','话术与FAQ','模板与规范'];
+/* 一期主档：商机级别与 C139 相互独立（级别是人的判断，C139 是模型评分，不联动） */
+const OPP_LEVELS=['控单','博弈','了解中'];
+const LOST_STAGES=['已流标','已输标','项目已取消'];
+function num0(v){const n=parseFloat(v);return isFinite(n)?n:0}
+function fmtWan(n){n=num0(n);return n%1===0?String(n):n.toFixed(1)}
+function amountsOf(p){const a=(p&&p.amounts)||{};return{est:num0(a.estTotal),sw:num0(a.software),won:num0(a.won),cost:num0(a.cost)}}
+function marginOf(p){const m=amountsOf(p);const profit=m.won?+(m.won-m.cost).toFixed(1):0;const rate=m.won?Math.round(profit/m.won*1000)/10:null;return Object.assign({},m,{profit,rate})}
+function oppBadge(l){if(!l)return '—';const cls=l==='控单'?'b-win':l==='博弈'?'b-plan':'b-pre';return `<span class="badge ${cls}">${esc(l)}</span>`}
 function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify(store))}catch(e){}try{schedulePush()}catch(e){}}
 function load(){try{const s=localStorage.getItem(LS_KEY);if(s)store=JSON.parse(s)}catch(e){}
   if(!store.projects)store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
@@ -86,26 +94,38 @@ function closeMask(id){document.getElementById(id).classList.remove('on')}
 function openMask(id){document.getElementById(id).classList.add('on')}
 
 /* ================= 项目管理 ================= */
-const STAGES=['前期交流','方案阶段','招投标阶段','已中标'];
-const STAGE_CLS={'前期交流':'b-pre','方案阶段':'b-plan','招投标阶段':'b-bid','已中标':'b-win','已流标':'b-fail','已输标':'b-lose'};
+const STAGES=['前期交流','方案阶段','招投标阶段','已中标','已流标','已输标','项目已取消'];
+const STAGE_CLS={'前期交流':'b-pre','方案阶段':'b-plan','招投标阶段':'b-bid','已中标':'b-win','已流标':'b-fail','已输标':'b-lose','项目已取消':'b-cancel'};
 function stageBadge(s){return `<span class="badge ${STAGE_CLS[s]||'b-fail'}">${esc(s)}</span>`}
 
 function openProjectModal(id){
   editingProjectId=id||null;
   const p=id?store.projects.find(x=>x.id===id):null;
+  const m=amountsOf(p||{});
   document.getElementById('pmTitle').textContent=p?'编辑项目':'新建项目';
-  pfName.value=p?p.name:'';pfCust.value=p?p.customer:'';pfStage.value=p?p.stage:'前期交流';
-  pfBudget.value=p?p.budget:'';pfOwner.value=p?p.owner:'';pfDate.value=p?p.keyDate:'';pfBg.value=p?p.source:'';
+  pfName.value=p?p.name:'';pfCust.value=p?p.customer:'';
+  pfSales.value=p?(p.sales||p.owner||''):'';pfPre.value=p?(p.presales||''):'';
+  pfStage.value=p?p.stage:'前期交流';pfOpp.value=p?(p.oppLevel||'了解中'):'了解中';
+  pfEst.value=m.est||'';pfSoft.value=m.sw||'';pfWon.value=m.won||'';pfCost.value=m.cost||'';
+  pfExpect.value=p?(p.expectSignMonth||''):'';pfActual.value=p?(p.actualSignMonth||''):'';
+  pfDate.value=p?p.keyDate:'';pfBg.value=p?p.source:'';
+  pfLostRow.style.display=LOST_STAGES.includes(pfStage.value)?'':'none';pfLost.value=p?(p.lostReason||''):'';
   openMask('mProject');
 }
+function onPfStageChange(){pfLostRow.style.display=LOST_STAGES.includes(pfStage.value)?'':'none'}
 function saveProject(){
-  if(!pfName.value.trim()||!pfCust.value.trim()){toast('请填写项目名称与客户名称');return}
+  if(!pfName.value.trim()||!pfCust.value.trim()){toast('请填写项目名称与甲方名称');return}
+  if(LOST_STAGES.includes(pfStage.value)&&!pfLost.value.trim()){toast('请填写「'+pfStage.value+'」原因');return}
+  const base={name:pfName.value.trim(),customer:pfCust.value.trim(),stage:pfStage.value,oppLevel:pfOpp.value,
+    sales:pfSales.value.trim(),presales:pfPre.value.trim(),
+    amounts:{estTotal:num0(pfEst.value),software:num0(pfSoft.value),won:num0(pfWon.value),cost:num0(pfCost.value)},
+    expectSignMonth:pfExpect.value,actualSignMonth:pfActual.value,keyDate:pfDate.value,source:pfBg.value,
+    lostReason:LOST_STAGES.includes(pfStage.value)?pfLost.value.trim():''};
   if(editingProjectId){
     const p=store.projects.find(x=>x.id===editingProjectId);
-    Object.assign(p,{name:pfName.value.trim(),customer:pfCust.value.trim(),stage:pfStage.value,budget:pfBudget.value,owner:pfOwner.value,keyDate:pfDate.value,source:pfBg.value});
-    addTl(p,'更新项目基本信息');
+    Object.assign(p,base);addTl(p,'更新项目基本信息');
   }else{
-    const p={id:uid(),name:pfName.value.trim(),customer:pfCust.value.trim(),stage:pfStage.value,budget:pfBudget.value,owner:pfOwner.value,keyDate:pfDate.value,source:pfBg.value,created:today(),c139:defaultC139(),tasks:[],timeline:[],bg:{},docs:[]};
+    const p=Object.assign({id:uid(),progressText:'',created:today(),c139:defaultC139(),tasks:[],timeline:[],bg:{},docs:[]},base);
     store.projects.unshift(p);addTl(p,'创建项目');
     currentProjectId=p.id;
   }
@@ -119,13 +139,14 @@ function renderProjects(){
   const st=document.getElementById('projStageFilter').value;
   let list=store.projects.filter(p=>(st==='all'||p.stage===st)&&(!kw||(p.name+p.customer).toLowerCase().includes(kw)));
   const t=document.getElementById('projTable');
-  if(!list.length){t.innerHTML='<tr><td colspan="8"><div class="empty">暂无项目，点击右上角「新建项目」开始</div></td></tr>';return}
-  t.innerHTML=`<tr><th>项目</th><th>客户</th><th>阶段</th><th>预算(万)</th><th>负责人</th><th>C139赢单率</th><th>关键日期</th><th style="width:170px">操作</th></tr>`+
-  list.map(p=>{const s=c139Stats(p.c139);return `<tr>
+  if(!list.length){t.innerHTML='<tr><td colspan="11"><div class="empty">暂无项目，点击右上角「新建项目」开始</div></td></tr>';return}
+  t.innerHTML=`<tr><th>项目</th><th>甲方</th><th>阶段</th><th>商机级别</th><th>预估(万)</th><th>软件(万)</th><th>C139赢单率</th><th>预计签约</th><th>销售</th><th>售前</th><th style="width:170px">操作</th></tr>`+
+  list.map(p=>{const s=c139Stats(p.c139);const m=amountsOf(p);return `<tr>
     <td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${p.id}')">${esc(p.name)}</b></td>
-    <td>${esc(p.customer)}</td><td>${stageBadge(p.stage)}</td><td>${esc(p.budget||'—')}</td><td>${esc(p.owner||'—')}</td>
+    <td>${esc(p.customer)}</td><td>${stageBadge(p.stage)}</td><td>${oppBadge(p.oppLevel)}</td>
+    <td>${m.est?fmtWan(m.est):'—'}</td><td>${m.sw?fmtWan(m.sw):'—'}</td>
     <td><div class="wr"><span class="pct" style="color:${s.rate>=85?'var(--ok)':s.rate>=50?'#b25e0c':'var(--bad)'}">${s.rate}%</span>${zoneBadge(s.zone)}</div></td>
-    <td>${esc(p.keyDate||'—')}</td>
+    <td>${esc(p.expectSignMonth||p.keyDate||'—')}</td><td>${esc(p.sales||'—')}</td><td>${esc(p.presales||'—')}</td>
     <td><button class="btn sm ghost" onclick="openDetail('${p.id}')">详情</button>
         <button class="btn sm ghost" onclick="openProjectModal('${p.id}')">编辑</button>
         <button class="btn sm danger" onclick="delProject('${p.id}')">删除</button></td></tr>`}).join('');
@@ -136,19 +157,23 @@ function filterStage(s){document.getElementById('projStageFilter').value=s;rende
 let dtTab='info';
 function openDetail(id){currentProjectId=id;dtTab='info';show('detail');renderDetail()}
 function getProj(id){return store.projects.find(p=>p.id===(id||currentProjectId))}
-function changeStage(v){const p=getProj();if(!p)return;p.stage=v;addTl(p,'阶段变更为「'+v+'」');persist();renderDetail();show('detail')}
+function changeStage(v){const p=getProj();if(!p)return;
+  if(LOST_STAGES.includes(v)&&!p.lostReason){const r=prompt('请输入「'+v+'」原因（必填）');if(r===null)return;if(!r.trim()){toast('必须填写原因');return}p.lostReason=r.trim()}
+  if(!LOST_STAGES.includes(v))p.lostReason='';
+  p.stage=v;addTl(p,'阶段变更为「'+v+'」'+(p.lostReason?'：'+p.lostReason:''));persist();renderDetail();show('detail')}
 function renderDetail(){
   const p=getProj();if(!p){show('projects');return}
+  const s=c139Stats(p.c139);const m=marginOf(p);
   document.getElementById('dtTitle').textContent=p.name;
-  const s=c139Stats(p.c139);
-  document.getElementById('dtSub').innerHTML=`${esc(p.customer)} · 预算 ${esc(p.budget||'—')} 万 · 负责人 ${esc(p.owner||'—')} · C139赢单率 <b>${s.rate}%</b> ${zoneBadge(s.zone)}`;
+  document.getElementById('dtSub').innerHTML=`${esc(p.customer)} · 销售 ${esc(p.sales||'—')} / 售前 ${esc(p.presales||'—')} · ${oppBadge(p.oppLevel)} · 预估 ${m.est?fmtWan(m.est)+' 万':'—'} · C139赢单率 <b>${s.rate}%</b> ${zoneBadge(s.zone)}`;
   document.getElementById('dtStage').value=p.stage;
   const order=['前期交流','方案阶段','招投标阶段','已中标'];
+  const lost=LOST_STAGES.includes(p.stage);
   const ci=order.indexOf(p.stage);
   document.getElementById('dtFlow').innerHTML=order.map((st,i)=>{
-    const cls=p.stage==='已流标'||p.stage==='已输标'?(i<=2?'done':''):(i<ci?'done':i===ci?'cur':'');
+    const cls=lost?(i<=2?'done':''):(i<ci?'done':i===ci?'cur':'');
     return `<div class="step ${cls}"><div class="dot">${i<ci?'✓':i+1}</div>${st}</div>`}).join('')+
-    (p.stage==='已流标'||p.stage==='已输标'?`<div class="step cur"><div class="dot" style="background:${p.stage==='已中标'?'var(--ok)':'var(--bad)'};color:#fff">✕</div>${p.stage}</div>`:'');
+    (lost?`<div class="step cur"><div class="dot" style="background:var(--bad);color:#fff">✕</div>${p.stage}</div>`:'');
   document.querySelectorAll('#dtTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===dtTab));
   document.getElementById('dtBody').innerHTML=({renderDtInfo,renderDtTask,renderDtTl,renderDtC139,renderDtDoc,renderDtStk,renderDtContract})[
     {info:'renderDtInfo',task:'renderDtTask',tl:'renderDtTl',c:'renderDtC139',doc:'renderDtDoc',stk:'renderDtStk',contract:'renderDtContract'}[dtTab]](p);
@@ -161,12 +186,31 @@ const BG_FIELDS=[
  ['swot','我方 SWOT 分析'],['ksf','KSF 关键成功要素'],['nodes','关键时间节点（调研/交流/招标/上线）']];
 function renderDtInfo(p){
   p.bg=p.bg||{};
+  const m=marginOf(p);const rate=c139Stats(p.c139).rate;
+  const wgt=Math.round(m.est*rate)/100;
   return `<div class="card"><h3>项目基本信息</h3><div class="grid g4" style="font-size:13px">
-    <div><span style="color:var(--sub)">客户</span><br><b>${esc(p.customer)}</b></div>
-    <div><span style="color:var(--sub)">预算</span><br><b>${esc(p.budget||'—')} 万</b></div>
-    <div><span style="color:var(--sub)">负责人</span><br><b>${esc(p.owner||'—')}</b></div>
-    <div><span style="color:var(--sub)">创建日期</span><br><b>${esc(p.created||'—')}</b></div></div>
-    <div style="margin-top:10px"><span style="color:var(--sub)">项目来源</span><br>${esc(p.source||'—')}</div></div>
+    <div><span style="color:var(--sub)">甲方</span><br><b>${esc(p.customer)}</b></div>
+    <div><span style="color:var(--sub)">销售 / 售前</span><br><b>${esc(p.sales||'—')} / ${esc(p.presales||'—')}</b></div>
+    <div><span style="color:var(--sub)">商机级别</span><br><b>${oppBadge(p.oppLevel)}</b></div>
+    <div><span style="color:var(--sub)">创建日期</span><br><b>${esc(p.created||'—')}</b></div>
+    <div><span style="color:var(--sub)">预计签约月</span><br><b>${esc(p.expectSignMonth||'—')}</b></div>
+    <div><span style="color:var(--sub)">实际签约月</span><br><b>${esc(p.actualSignMonth||'—')}</b></div>
+    <div><span style="color:var(--sub)">关键日期（投标/开标）</span><br><b>${esc(p.keyDate||'—')}</b></div>
+    <div><span style="color:var(--sub)">C139 赢单率</span><br><b>${rate}%</b></div></div>
+    <div style="margin-top:10px"><span style="color:var(--sub)">项目来源</span><br>${esc(p.source||'—')}</div>
+    ${p.lostReason?`<div style="margin-top:8px;color:var(--bad)"><b>${esc(p.stage)}原因：</b>${esc(p.lostReason)}</div>`:''}
+    <label class="f" style="margin-top:8px"><span>当前进展（一段话小结）</span>
+    <textarea rows="2" onchange="getProj().progressText=this.value;persist();toast('已保存')">${esc(p.progressText||'')}</textarea></label></div>
+    <div class="card"><h3>金额与毛利（万元）</h3><div class="grid g4" style="font-size:13px">
+    <div><span style="color:var(--sub)">预估合同额</span><br><b>${m.est?fmtWan(m.est):'—'}</b></div>
+    <div><span style="color:var(--sub)">软件合同额</span><br><b>${m.sw?fmtWan(m.sw):'—'}</b></div>
+    <div><span style="color:var(--sub)">中标合同额</span><br><b>${m.won?fmtWan(m.won):'—'}</b></div>
+    <div><span style="color:var(--sub)">项目成本</span><br><b>${m.cost?fmtWan(m.cost):'—'}</b></div>
+    <div><span style="color:var(--sub)">毛利（中标−成本）</span><br><b style="color:${m.won?(m.profit>=0?'var(--ok)':'var(--bad)'):'var(--sub)'}">${m.won?fmtWan(m.profit):'—'}</b></div>
+    <div><span style="color:var(--sub)">毛利率</span><br><b>${m.rate===null?'—':m.rate+'%'}</b></div>
+    <div><span style="color:var(--sub)">加权金额（预估×赢单率）</span><br><b>${m.est?fmtWan(wgt):'—'}</b></div>
+    <div><span style="color:var(--sub)">中标 ÷ 预估</span><br><b>${(m.won&&m.est)?Math.round(m.won/m.est*100)+'%':'—'}</b></div></div>
+    <div class="hint" style="margin-top:8px">金额在「编辑项目」里维护；毛利=中标合同额−项目成本，毛利率=毛利÷中标合同额，加权金额用于经营视角排序。</div></div>
     <div class="card"><h3>项目背景收集表（售前第一动作，随交流持续更新）</h3>
     ${BG_FIELDS.map(f=>`<label class="f"><span>${f[1]}</span>
       <textarea rows="2" onchange="getProj().bg['${f[0]}']=this.value;addTl(getProj(),'更新了背景：${f[1]}');persist()">${esc(p.bg[f[0]]||'')}</textarea></label>`).join('')}
@@ -637,7 +681,9 @@ function editorHtml(t){
 function buildAgentPrompt(t){
   const p=getProj(t.projectId);const D=DOC_TYPES[t.type];const s=c139Stats(p.c139);
   let q=`【角色】你是${D.expert}，${t.type==='other'?'请为项目处理以下事务型任务：'+(t.answers.topic||t.title):'请为项目编制《'+D.name+'》'}。${D.agent}。\n\n`;
-  q+=`【项目概况】\n项目名称：${p.name}\n客户：${p.customer}\n预算：${p.budget||'—'} 万元 · 阶段：${p.stage} · C139赢单率：${s.rate}%（${s.zone==='win'?'赢单区':s.zone==='mid'?'抖动区':'输单区'}）\n\n`;
+  const am=amountsOf(p);
+  q+=`【项目概况】\n项目名称：${p.name}\n客户：${p.customer}\n预估合同额：${am.est||'—'} 万元${am.sw?'（其中软件 '+am.sw+' 万元）':''} · 阶段：${p.stage} · C139赢单率：${s.rate}%（${s.zone==='win'?'赢单区':s.zone==='mid'?'抖动区':'输单区'}）\n\n`;
+  if(p.progressText)q+=`【当前进展】\n${p.progressText}\n\n`;
   q+=`【项目背景】\n`;
   let any=false;BG_FIELDS.forEach(f=>{if(p.bg&&p.bg[f[0]]){q+=`- ${f[1]}：${p.bg[f[0]]}\n`;any=true}});
   if(!any)q+='- （背景收集表为空，请先补充）\n';
@@ -877,18 +923,28 @@ function resetChecklist(){const pid=document.getElementById('chkProj').value;sto
 /* ================= 仪表盘 ================= */
 function renderDash(){
   const ps=store.projects;
-  const active=ps.filter(p=>!['已中标','已流标','已输标'].includes(p.stage));
-  const win=ps.filter(p=>p.stage==='已中标').length;
-  const totalBudget=ps.reduce((s,p)=>s+(parseFloat(p.budget)||0),0);
+  const active=ps.filter(p=>!LOST_STAGES.includes(p.stage)&&p.stage!=='已中标');
+  const won=ps.filter(p=>p.stage==='已中标');
+  const lost=ps.filter(p=>LOST_STAGES.includes(p.stage));
+  const estSum=active.reduce((s,p)=>s+amountsOf(p).est,0);
+  const wgtSum=active.reduce((s,p)=>s+amountsOf(p).est*c139Stats(p.c139).rate/100,0);
+  const wonSum=won.reduce((s,p)=>s+amountsOf(p).won,0);
+  const profitSum=won.reduce((s,p)=>s+marginOf(p).profit,0);
+  const winRate=(won.length+lost.length)?Math.round(won.length/(won.length+lost.length)*100):0;
   const avgRate=active.length?Math.round(active.reduce((s,p)=>s+c139Stats(p.c139).rate,0)/active.length):0;
   document.getElementById('dashKpis').innerHTML=[
-    ['在途项目',active.length,'个'],['累计跟踪项目',ps.length,'个'],['预算总额',totalBudget,'万'],['已中标',win,'个'],['平均赢单率',avgRate,'%']
+    ['在跟项目',active.length,'个'],['预估总额',fmtWan(Math.round(estSum*10)/10),'万'],
+    ['加权金额',fmtWan(Math.round(wgtSum*10)/10),'万'],['已中标合同额',fmtWan(Math.round(wonSum*10)/10),'万'],
+    ['已中标毛利',fmtWan(Math.round(profitSum*10)/10),'万'],['中标率',winRate,'%'],['平均赢单率',avgRate,'%']
   ].map(k=>`<div class="kpi"><div class="lb">${k[0]}</div><div class="num">${k[1]}<small style="font-size:12px;font-weight:400"> ${k[2]}</small></div><div class="lb">&nbsp;</div></div>`).join('');
-  const stages=['前期交流','方案阶段','招投标阶段','已中标','已流标','已输标'];
+  const stages=['前期交流','方案阶段','招投标阶段','已中标','已流标','已输标','项目已取消'];
   const max=Math.max(1,...stages.map(s=>ps.filter(p=>p.stage===s).length));
-  document.getElementById('dashFunnel').innerHTML=stages.map(s=>{
+  const funnelHtml=stages.map(s=>{
     const n=ps.filter(p=>p.stage===s).length;
-    return `<div class="funnel-row"><div class="fname">${s}</div><div class="fbar"><i style="width:${Math.round(n/max*100)}%">${n}</i></div></div>`}).join('')||'<div class="empty">暂无数据</div>';
+    return `<div class="funnel-row"><div class="fname">${s}</div><div class="fbar"><i style="width:${Math.round(n/max*100)}%">${n}</i></div></div>`}).join('');
+  const lvHtml=OPP_LEVELS.map(l=>`<span class="tag" style="margin:2px 8px 2px 0">${l} · ${active.filter(p=>p.oppLevel===l).length}</span>`).join('');
+  document.getElementById('dashFunnel').innerHTML=funnelHtml+
+    `<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px;font-size:12px;color:var(--sub)">在跟项目商机级别：${lvHtml||'—'}</div>`;
   const top=[...active].sort((a,b)=>c139Stats(b.c139).rate-c139Stats(a.c139).rate).slice(0,6);
   document.getElementById('dashTop').innerHTML=top.length?'<table>'+top.map(p=>{const s=c139Stats(p.c139);return `<tr><td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${p.id}')">${esc(p.name)}</b><br><small style="color:var(--sub)">${esc(p.customer)}</small></td>
     <td style="text-align:right"><span class="pct" style="font-weight:700;color:${s.rate>=85?'var(--ok)':s.rate>=50?'#b25e0c':'var(--bad)'}">${s.rate}%</span> ${zoneBadge(s.zone)}</td></tr>`}).join('')+'</table>'
@@ -1312,13 +1368,47 @@ function renderDtContract(p){
 /* ================= 演示种子数据 ================= */
 function seed(){
   if(store.projects.length||store.kb.length){return}
-  const c=defaultC139();c.is1W=false;c.coach=true;c.consensus=[true,true,false];c.factors=[true,true,true,true,true,true,true,false,false];c.note='信息中心王主任，希望我方赢单，多次核实友商动态';
-  store.projects=[{id:'demo1',name:'某市政务云二期建设项目',customer:'某市大数据管理局',stage:'方案阶段',budget:'860',owner:'张三',keyDate:'2026-10-15',
-    source:'通过行业展会获知，客户一期由友商承建，二期预算已列入财政计划',created:today(),c139:c,
-    bg:{why:'一期资源利用率低、跨部门数据共享难，领导要求二期实现统一算力与数据中枢',chain:'分管副局长（决策者）；大数据局局长（使用方代表）；信息中心王主任（技术把关，倾向我方）',rival:'A公司（一期承建商，有粘性）；B公司（低价策略）'},
-    tasks:[{title:'完成首次交流PPT并预约副局长汇报',done:true},{title:'补齐9要素第8、9项研判',done:false},{title:'输出技术方案PPT初稿',done:false}],
-    timeline:[{d:today(),t:'创建项目并导入C139评估'},{d:today(),t:'完成信息中心王主任拜访'}],docs:[]}];
-  store.tasks=[{id:'t1',projectId:'demo1',type:'first',title:'某市政务云二期建设整体思路交流',autoTitle:true,status:'chat',qIndex:1,created:today(),ts:Date.now()-22e5,draft:null,
+  const C=o=>Object.assign(defaultC139(),o||{});
+  const mk=(id,name,customer,stage,oppLevel,sales,presales,amt,mon,c139,extra)=>Object.assign({
+    id,name,customer,stage,oppLevel,sales,presales,
+    amounts:{estTotal:amt[0]||0,software:amt[1]||0,won:amt[2]||0,cost:amt[3]||0},
+    expectSignMonth:mon[0]||'',actualSignMonth:mon[1]||'',keyDate:mon[2]||'',
+    source:'',progressText:'',lostReason:'',created:today(),c139:c139||C(),tasks:[],timeline:[],bg:{},docs:[]},extra||{});
+  store.projects=[
+    mk('p1','省农信社核心系统灾备建设项目','青海省农村信用社联合社','招投标阶段','控单','王强','李晓峰',
+      [860,520,0,0],['2026-10','','2026-09-28'],
+      C({coach:true,is1W:true,consensus:[true,true,true],factors:[true,true,true,true,true,true,true,true,false],note:'科技部处处长期待我方方案，招标参数已体现双活要求'}),
+      {source:'一期维保关系转入，客户立项批复已下达',progressText:'已发标，9/28 开标；技术参数对我方有利，重点防低价搅局与答疑澄清。',
+       bg:{why:'核心系统无异地灾备，监管要求 2026 年底前达到 RPO≤15 分钟',chain:'科技部（决策把关）→ 分管副主任（决策者）→ 运营管理部（使用方）',rival:'A公司（同城灾备一期承建商）；B公司（低价策略）'},
+       tasks:[{title:'完成投标文件编制与内部评审',done:false},{title:'述标PPT与答疑分工',done:false},{title:'锁定参数偏离项应对口径',done:true}],
+       timeline:[{d:today(),t:'拿到招标文件，C139 复评：控单'},{d:today(),t:'科技处沟通确认技术参数无排他风险'}]}),
+    mk('p2','某银行信贷系统升级项目','青海银行','方案阶段','博弈','王强','陈晨',
+      [480,320,0,0],['2026-12','',''],
+      C({coach:true,consensus:[true,false,false],factors:[true,true,true,true,true,true,false,false,false]}),
+      {source:'客户科技规划接触，原厂渠道获知',progressText:'完成两轮技术交流，等待预算批复；友商同步在推，需尽快建立教练校准信息。',
+       tasks:[{title:'向信息科技部汇报升级方案',done:true},{title:'摸清竞品报价区间',done:false}],
+       timeline:[{d:today(),t:'第二轮交流完成，客户关注平滑迁移与不停机切换'}]}),
+    mk('p3','某市政务云二期建设项目','某市大数据管理局','已中标','控单','张磊','李晓峰',
+      [860,500,796,608],['2026-07','2026-08','2026-06-20'],
+      C({coach:true,is1W:true,consensus:[true,true,true],factors:[true,true,true,true,true,true,true,true,true],note:'信息中心王主任为教练，全程引导评分办法'}),
+      {source:'一期维保 + 行业展会获知，二期预算列入财政计划',progressText:'已签约进入交付，回款按 3:6:1 执行；毛利 188 万（23.6%）。',
+       bg:{why:'一期资源利用率低、跨部门数据共享难，领导要求统一算力与数据中枢',chain:'分管副局长（决策者）；大数据局局长（使用方代表）；信息中心王主任（技术把关，倾向我方）',rival:'A公司（一期承建商，有粘性）；B公司（低价策略）'},
+       tasks:[{title:'中标复盘并沉淀评分办法经验',done:true},{title:'交付启动会与里程碑确认',done:false}],
+       timeline:[{d:'2026-08-16',t:'完成合同签署，进入交付'},{d:'2026-06-25',t:'开标，综合评分第一'}]}),
+    mk('p4','智慧园区综合管理平台','某园区管委会','前期交流','了解中','刘洋','陈晨',
+      [260,150,0,0],['2027-03','',''],
+      C({factors:[true,false,false,false,false,false,false,false,false]}),
+      {source:'园区招商推介会认识管委会信息化科',progressText:'初次交流完成，等园区数字化规划初稿出来再判断真实预算与时间。'}),
+    mk('p5','互联网医院平台建设项目','某三甲医院','已输标','博弈','张磊','李晓峰',
+      [390,240,0,0],['2026-05','','2026-05-30'],
+      C({consensus:[false,false,false],factors:[true,true,true,false,false,false,false,false,false]}),
+      {lostReason:'报价高出中标人 12%，商务分差距过大；对手为一期承建商，客户关系深厚',progressText:'已完成复盘：报价策略与决策链覆盖不足，经验与竞品情报入知识库。',
+       timeline:[{d:'2026-06-02',t:'开标失利，综合评分第三'}]}),
+    mk('p6','政务云等保改造项目','某市行政审批局','项目已取消','了解中','刘洋','陈晨',
+      [150,90,0,0],['2026-11','',''],
+      C(),{lostReason:'客户预算削减，项目推迟至下一财政年度',progressText:'保持联系，明年初预算恢复后重新立项。'})
+  ];
+  store.tasks=[{id:'t1',projectId:'p3',type:'first',title:'某市政务云二期建设整体思路交流',autoTitle:true,status:'chat',qIndex:1,created:today(),ts:Date.now()-22e5,draft:null,
     answers:{theme:'某市政务云二期建设整体思路交流'},
     msgs:[
     {role:'ai',text:'您好！我是「售前交流专家」🎙️，本次任务由我负责为您编制《首次售前交流 PPT》。\n项目：某市政务云二期建设项目\n客户：某市大数据管理局 · 阶段：方案阶段 · C139 赢单率 22%',ts:Date.now()-9e5},
@@ -1333,13 +1423,13 @@ function seed(){
     {id:'k1',title:'我司政务云解决方案白皮书（摘要）',catId:catOf('产品资料'),tags:['政务云','白皮书'],content:'一云多芯、统一算力调度、数据共享交换平台、等保三级合规。核心指标：资源利用率提升40%，跨部门数据共享T+1→T+0。',date:today()},
     {id:'k2',title:'标杆案例：省会城市X政务云',catId:catOf('案例库'),tags:['政务云','案例','标杆'],content:'2024年建成，服务68个委办局，承载1200+业务系统，双十一式高峰零故障，获省级优秀案例。可提供现场参观。',date:today()},
     {id:'k3',title:'A公司竞争情报',catId:catOf('竞品情报'),tags:['A公司','竞争'],content:'优势：一期承建粘性、本地团队大。劣势：多云纳管能力弱、报价高、二期有资源利用率投诉。应对：主打一云多芯开放架构+利用率承诺SLA。',date:today()}];
-  store.pdocs={demo1:{input:[{id:uid(),name:'政务云二期需求建议书（客户邮件附件）',kind:'PDF',size:0,date:today(),from:'登记',note:'客户信息中心发送 v1.2',content:''}],process:{folders:[{id:'f1',name:'调研记录',docs:[{id:uid(),name:'信息中心王主任访谈纪要',kind:'MD',size:0,date:today(),from:'上传',note:'2026-08 现场调研',content:'要点：一期利用率不足35%；二期考核指标为跨部门共享率；副局长关注自主可控。'}]}],docs:[]},output:[],ref:[{id:uid(),name:'GB/T 政务云安全要求',kind:'PDF',size:0,date:today(),from:'登记',note:'标准规范参考',content:''}]}};
-  store.stakeholders={demo1:[
+  store.pdocs={p3:{input:[{id:uid(),name:'政务云二期需求建议书（客户邮件附件）',kind:'PDF',size:0,date:today(),from:'登记',note:'客户信息中心发送 v1.2',content:''}],process:{folders:[{id:'f1',name:'调研记录',docs:[{id:uid(),name:'信息中心王主任访谈纪要',kind:'MD',size:0,date:today(),from:'上传',note:'2026-08 现场调研',content:'要点：一期利用率不足35%；二期考核指标为跨部门共享率；副局长关注自主可控。'}]}],docs:[]},output:[],ref:[{id:uid(),name:'GB/T 政务云安全要求',kind:'PDF',size:0,date:today(),from:'登记',note:'标准规范参考',content:''}]}};
+  store.stakeholders={p3:[
     {id:uid(),name:'王建国',title:'信息中心主任',dept:'市大数据局',role:'技术把关',influence:'high',attitude:'support',phone:'138****1234',email:'wang@example.gov',focus:'自主可控、资源利用率、后续运维便利性',notes:'可发展为教练，多次透露友商弱点',updated:today()},
     {id:uid(),name:'李副局长',title:'副局长',dept:'市大数据局',role:'决策者',influence:'high',attitude:'neutral',phone:'',email:'',focus:'政绩、预算可控、风险低',notes:'尚未直接交流，需通过王主任安排',updated:today()}
   ]};
-  store.contracts={demo1:{contractNo:'HT-2026-ZWYC-002',amount:860,signDate:'',endDate:'2027-10-15',paymentTerms:'3:6:1',status:'洽谈中',notes:'按招标文件付款条款，预留 10% 质保金一年',attachments:[]}};
-  store.quotations={demo1:[
+  store.contracts={p3:{contractNo:'HT-2026-ZWYC-002',amount:796,signDate:'2026-08-16',endDate:'2027-10-15',paymentTerms:'3:6:1',status:'已签署',notes:'按招标文件付款条款，预留 10% 质保金一年',attachments:[]}};
+  store.quotations={p3:[
     {id:uid(),name:'V1 初版报价',date:today(),status:'草稿',notes:'含软硬件、实施、三年维保',excelFile:null,
      items:[{name:'云平台软件授权',qty:1,cost:120,quote:180,remark:'含一云多芯、算力调度'},
             {name:'硬件服务器',qty:8,cost:240,quote:320,remark:'信创服务器'},
@@ -1347,10 +1437,12 @@ function seed(){
             {name:'三年维保',qty:1,cost:60,quote:90,remark:'7×24'}]}
   ]};
   store.compintel=[
-    {id:uid(),competitor:'A公司',projectId:'demo1',product:'政务云一期续建方案',price:920,source:'客户透露/公开中标公告',date:today(),
-     strategy:'强调一期粘性与迁移成本，承诺免费平滑升级',strengths:'一期承建商，数据迁移风险低，客户关系深',weaknesses:'多云纳管能力弱，二期扩容报价高，一期利用率投诉未解决'}
+    {id:uid(),competitor:'A公司',projectId:'p3',product:'政务云一期续建方案',price:920,source:'客户透露/公开中标公告',date:today(),
+     strategy:'强调一期粘性与迁移成本，承诺免费平滑升级',strengths:'一期承建商，数据迁移风险低，客户关系深',weaknesses:'多云纳管能力弱，二期扩容报价高，一期利用率投诉未解决'},
+    {id:uid(),competitor:'B公司',projectId:'p1',product:'异地灾备低价方案',price:610,source:'同业交流',date:today(),
+     strategy:'以低价切入，后续再收维保费',strengths:'价格灵活，本地有代理',weaknesses:'无金融行业双活案例，RPO 指标达不到监管口径'}
   ];
-  store.requirements={demo1:[
+  store.requirements={p3:[
     {id:uid(),title:'跨部门数据共享T+0',category:'业务需求',priority:'high',status:'analyzed',source:'招标文件 / 客户访谈',relatedKb:'标杆案例：省会城市X政务云',
      description:'打破委办局数据壁垒，实现跨部门共享实时可达',analysis:'我方数据共享交换平台已验证，T+0 能力可支持；需在方案中给出架构图与性能指标'},
     {id:uid(),title:'一云多芯统一纳管',category:'非功能需求',priority:'high',status:'pending',source:'招标文件',relatedKb:'我司政务云解决方案白皮书',

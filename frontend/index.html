@@ -61,7 +61,7 @@
           <select id="projStageFilter" onchange="renderProjects()">
             <option value="all">全部阶段</option>
             <option>前期交流</option><option>方案阶段</option><option>招投标阶段</option>
-            <option>已中标</option><option>已流标</option><option>已输标</option>
+            <option>已中标</option><option>已流标</option><option>已输标</option><option>项目已取消</option>
           </select>
         </div>
         <div style="overflow-x:auto"><table id="projTable"></table></div>
@@ -75,7 +75,7 @@
         <div style="display:flex;gap:8px;align-items:center">
           <select id="dtStage" onchange="changeStage(this.value)" style="width:150px">
             <option>前期交流</option><option>方案阶段</option><option>招投标阶段</option>
-            <option>已中标</option><option>已流标</option><option>已输标</option>
+            <option>已中标</option><option>已流标</option><option>已输标</option><option>项目已取消</option>
           </select>
           <button class="btn ghost" onclick="show('projects')">← 返回列表</button>
         </div>
@@ -208,13 +208,23 @@
   <h3><span id="pmTitle">新建项目</span><button class="x" onclick="closeMask('mProject')">✕</button></h3>
   <div class="grid g2">
     <label class="f"><span>项目名称 *</span><input id="pfName" placeholder="如：XX集团数字化平台项目"></label>
-    <label class="f"><span>客户名称 *</span><input id="pfCust"></label>
-    <label class="f"><span>项目阶段</span><select id="pfStage"><option>前期交流</option><option>方案阶段</option><option>招投标阶段</option><option>已中标</option><option>已流标</option><option>已输标</option></select></label>
-    <label class="f"><span>预算金额（万元）</span><input id="pfBudget" placeholder="如 300"></label>
-    <label class="f"><span>负责人</span><input id="pfOwner"></label>
-    <label class="f"><span>预计投标/关键日期</span><input id="pfDate" type="date"></label>
+    <label class="f"><span>甲方名称 *</span><input id="pfCust"></label>
+    <label class="f"><span>销售</span><input id="pfSales"></label>
+    <label class="f"><span>售前</span><input id="pfPre"></label>
+    <label class="f"><span>商机级别</span><select id="pfOpp"><option>控单</option><option>博弈</option><option>了解中</option></select></label>
+    <label class="f"><span>项目阶段</span><select id="pfStage" onchange="onPfStageChange()"><option>前期交流</option><option>方案阶段</option><option>招投标阶段</option><option>已中标</option><option>已流标</option><option>已输标</option><option>项目已取消</option></select></label>
   </div>
-  <label class="f"><span>项目背景与来源</span><textarea id="pfBg" rows="3" placeholder="客户为什么立项？项目如何获知的？"></textarea></label>
+  <div class="grid g4" style="margin-top:2px">
+    <label class="f"><span>预估合同额（万）</span><input id="pfEst" type="number" min="0" step="0.1" placeholder="0"></label>
+    <label class="f"><span>软件合同额（万）</span><input id="pfSoft" type="number" min="0" step="0.1" placeholder="0"></label>
+    <label class="f"><span>中标合同额（万）</span><input id="pfWon" type="number" min="0" step="0.1" placeholder="中标后填"></label>
+    <label class="f"><span>项目成本（万）</span><input id="pfCost" type="number" min="0" step="0.1" placeholder="0"></label>
+    <label class="f"><span>预计签约月</span><input id="pfExpect" type="month"></label>
+    <label class="f"><span>实际签约月</span><input id="pfActual" type="month"></label>
+    <label class="f"><span>关键日期（投标/开标）</span><input id="pfDate" type="date"></label>
+  </div>
+  <label class="f" id="pfLostRow" style="display:none;margin-top:2px"><span>取消 / 流标 / 输标原因 *</span><input id="pfLost" placeholder="必填：如预算削减、评分差距、关系壁垒"></label>
+  <label class="f"><span>项目背景与来源</span><textarea id="pfBg" rows="2" placeholder="客户为什么立项？项目如何获知的？"></textarea></label>
   <div style="text-align:right;margin-top:8px"><button class="btn ghost" onclick="closeMask('mProject')">取消</button>
   <button class="btn" style="margin-left:10px" onclick="saveProject()">保存</button></div>
 </div></div>

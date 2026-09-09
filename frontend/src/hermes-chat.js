@@ -163,13 +163,15 @@
 
   function hxProjectBlock(p) {
     var s = (typeof c139Stats === 'function' && p.c139) ? c139Stats(p.c139) : { rate: '—', zone: '' }
+    var am = (typeof amountsOf === 'function') ? amountsOf(p) : { est: 0, sw: 0 }
     var q = '【项目概况】\n'
       + '项目名称：' + (p.name || '—') + '\n'
       + '客户：' + (p.customer || '—') + '\n'
-      + '预算：' + (p.budget || '—') + ' 万元 ｜ 阶段：' + (p.stage || '—')
+      + '预估合同额：' + (am.est || '—') + ' 万元' + (am.sw ? '（其中软件 ' + am.sw + ' 万元）' : '') + ' ｜ 阶段：' + (p.stage || '—')
       + ' ｜ C139 赢单率：' + s.rate + '%'
       + (s.zone ? '（' + (s.zone === 'win' ? '赢单区' : s.zone === 'mid' ? '抖动区' : '输单区') + '）' : '') + '\n'
       + (p.source ? '项目来源：' + p.source + '\n' : '')
+      + (p.progressText ? '当前进展：' + p.progressText + '\n' : '')
     q += '\n【项目背景收集表】\n'
     var any = false
     if (typeof BG_FIELDS !== 'undefined' && p.bg) {

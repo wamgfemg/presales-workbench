@@ -51,6 +51,7 @@ label.f>span{display:block;font-size:12px;color:var(--sub);margin-bottom:5px}
 .b-pre{background:#e7f0ff;color:#1c5ed8}.b-plan{background:#f1e9ff;color:#6d33c9}
 .b-bid{background:#fff2df;color:#b25e00}.b-win{background:#e6f4ea;color:#2f9e44}
 .b-lose{background:#fde8ef;color:#d6336c}.b-fail{background:#eceff5;color:#6b7488}
+.b-cancel{background:#f2f3f5;color:#9aa2b1;text-decoration:line-through}
 /* ===== 表格 ===== */
 table{width:100%;border-collapse:collapse}
 th{font-size:12px;color:var(--sub);text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);background:#f8fafd;white-space:nowrap}
