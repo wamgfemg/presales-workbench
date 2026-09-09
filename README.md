@@ -42,6 +42,30 @@
 同机共存（本项目不碰）：WeKnora :80/:8080 · ollama :11434 · weknora-mcp-bridge :8082/:8083
 ```
 
+## 二·五、业务数据落库（SQLite）
+
+工作台的项目/文档/任务/资料此前只存在浏览器 localStorage（`presales_workbench_v1`），换浏览器或换电脑就看不到，同事之间也无法共享；上传的合同附件、报价 Excel 走 `data/files/` 目录，记录与原件分两处。现已统一到服务器上的一个库里：
+
+```
+data/presales.db
+  state(key, data, rev, size, updated_at, updated_by)   每个顶层集合一行整块 JSON
+  files(id, name, mime, size, scope, data BLOB, created_at)   上传的资料原件
+```
+
+| 要点 | 说明 |
+|---|---|
+| 依赖 | 仍然零第三方依赖：Node 22 内置 `node:sqlite`（实测 SQLite 3.51.3），不装 npm、不加容器 |
+| 粒度 | 按集合存整块 JSON，不按字段建宽表（业务对象结构一直在演进）；同集合内并发用 `rev` 乐观检测 |
+| 事务 | WAL + `synchronous=NORMAL` + `busy_timeout` + `wal_autocheckpoint=256`，崩溃只丢最后一个事务 |
+| 接口 | `GET /api/state[?meta=1][&keys=a,b]`、`GET/PUT/DELETE /api/state/:key`、`POST /api/state/import`；`POST/GET/DELETE /api/files[...]` |
+| 前端 | `persist()` 的 49 处调用点一行未改；写完 localStorage（秒开缓存 + 断网兜底）后按集合 diff，800ms 去抖串行 PUT |
+| 轮询 | 启动拉一次全量；之后 60s 只拉 `?meta=1` 比 rev，本机干净而库变了才按 `keys=` 精准下载；页面切回前台立即拉 |
+| 首次上云 | 库里集合缺失/为空而本机非空 → 自动上传本机现有数据；本机为空则拉库。覆盖本机前存 `presales_workbench_v1_legacy` 快照 |
+| 并发冲突 | 后提交者收到「同事刚改过，已按你这份覆盖」后强制写入（无鉴权，同一份共享数据） |
+| 体积 | 单集合 JSON 上限 `MAX_STATE_BODY` 16MB，单文件 `MAX_DB_FILE` 32MB；`/api/health` 的 `db` 段可直接看 collections/dataKB/files/filesMB |
+
+项目知识库（pdocs）的「⬆ 上传文件」不再只留一个文件名：原件进 `files` 表，记录里存 `fileId`，表格给「下载」；正文由服务端 `/api/chat/extract` 解析（txt/md/docx 等）后用于预览，解析不了的格式（pdf/xlsx）仍可下载原件。删除记录会连带删除库内原件。
+
 ## 三、目录结构
 
 ```
@@ -51,9 +75,13 @@ frontend/
   src/main.js           原工作台全部业务逻辑（项目/知识库/C139/工具箱，未改动）
   src/hermes-chat.js    ★ 覆盖方案制作中心对话 → 走 BFF 调 Hermes（流式）
 server/
-  index.js              BFF：静态托管 + /api/chat(SSE) + /api/health + /api/reset
+  index.js              BFF：静态托管 + /api/chat(SSE) + /api/state(落库) + /api/files + /api/health
+  db.js                 ★ SQLite 存储层：state 表 + files 表(BLOB)、WAL、rev 乐观并发、体积统计
   hermes.js             Hermes 客户端 + 会话池（LRU 淘汰、TTL 回收）
   .env.example          配置样例（真实 .env 不入库）
+data/                   （运行时生成，不入仓库）presales.db + session-map.json
+  —— CI 的 rsync 只同步 frontend/server/deploy，不会动 data/
+
 deploy/
   setup.sh              服务器首次部署（幂等）
   presales-workbench.service   systemd 单元（包一层 docker run）

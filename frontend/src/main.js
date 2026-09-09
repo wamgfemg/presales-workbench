@@ -6,7 +6,7 @@ let store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
 let editingProjectId=null, currentProjectId=null, kbEditingId=null;
 
 const DEF_CATS=['产品资料','案例库','技术方案素材','公司资质与实力','竞品情报','话术与FAQ','模板与规范'];
-function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify(store))}catch(e){}}
+function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify(store))}catch(e){}try{schedulePush()}catch(e){}}
 function load(){try{const s=localStorage.getItem(LS_KEY);if(s)store=JSON.parse(s)}catch(e){}
   if(!store.projects)store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
     stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{}};
@@ -295,8 +295,9 @@ function pdDocsTable(docs){
   docs.map(dc=>`<tr><td><b>${esc(dc.name)}</b></td><td>${esc(dc.kind||'—')}</td><td>${fmtSize(dc.size)}</td><td>${esc(dc.date||'—')}</td>
     <td><span class="tag">${esc(dc.from||'手动登记')}</span></td><td style="max-width:220px">${esc(dc.note||'')}</td>
     <td>${dc.content?`<button class="btn sm ghost" onclick="pdView('${dc.id}')">预览</button>`:''}
+        ${dc.fileId?`<a class="btn sm ghost" href="/api/files/download/${encodeURIComponent(dc.fileId)}" target="_blank" title="原件已存服务器 SQLite">下载</a>`:''}
         <button class="btn sm ghost" onclick="pdMove('${dc.id}')">移动</button>
-        <button class="btn sm danger" onclick="pdDel('${dc.id}')">删除</button></td></tr>`).join('')+'</table></div>';
+        <button class="btn sm danger" onclick="pdDel('${dc.id}')">删除</button>${(!dc.content&&!dc.fileId)?'<span class="sub-cnt">仅登记</span>':''}</td></tr>`).join('')+'</table></div>';
 }
 function pdFind(id){
   for(const pid in store.pdocs){const d=store.pdocs[pid];
@@ -306,14 +307,33 @@ function pdFind(id){
   return null;
 }
 function pdTargetList(d){return pdTab==='process'?(pdFolder==='root'?d.process.docs:((d.process.folders.find(f=>f.id===pdFolder)||d.process).docs)):d[pdTab]}
-function pdUpload(inp){
-  if(!pdPid)return;const d=pdOf(pdPid);const target=pdTargetList(d);
-  [...inp.files].forEach(f=>{
-    const ext=f.name.split('.').pop().toLowerCase();
-    const dc={id:uid(),name:f.name,kind:ext.toUpperCase(),size:f.size,date:today(),from:'上传',note:'',content:''};
-    target.push(dc);
-    if(['txt','md','csv','json','log'].includes(ext)){const r=new FileReader();r.onload=()=>{dc.content=r.result.slice(0,50000);persist();renderPdocs()};r.readAsText(f,'utf-8')}});
-  persist();renderPdocs();inp.value='';toast('已上传归档到当前分类');
+async function pdUpload(inp){
+  if(!pdPid){toast('请先选择项目');return}
+  const d=pdOf(pdPid);const target=pdTargetList(d);
+  const files=[...inp.files];inp.value='';
+  for(const f of files){
+    const ext=(f.name.split('.').pop()||'').toLowerCase();
+    const dc={id:uid(),name:f.name,kind:ext.toUpperCase(),size:f.size,date:today(),from:'上传',note:'',content:'',fileId:null};
+    target.push(dc);persist();renderPdocs();
+    if(['txt','md','markdown','csv','json','log','yaml','yml','xml','html','htm'].includes(ext)){
+      const r=new FileReader();r.onload=()=>{dc.content=String(r.result).slice(0,50000);persist();renderPdocs()};r.readAsText(f,'utf-8');
+    }
+    try{
+      const up=await fetch('/api/files/upload',{method:'POST',headers:{'x-filename':encodeURIComponent(f.name),'x-scope':encodeURIComponent('pdocs/'+pdPid)},body:f});
+      const uj=await up.json().catch(()=>({}));
+      if(!up.ok||!uj.fileId)throw new Error(uj.error||('HTTP '+up.status));
+      dc.fileId=uj.fileId;dc.size=uj.size||f.size;
+    }catch(e){dc.note=((dc.note?dc.note+' | ':'')+'原件入库失败：'+((e&&e.message)||e));persist();renderPdocs();continue}
+    if(!dc.content){ // 交给服务端解析正文（docx/txt 类支持；pdf 等不支持时静默跳过，仍可下载原件）
+      try{
+        const ex=await fetch('/api/chat/extract',{method:'POST',headers:{'content-type':'application/octet-stream','x-filename':encodeURIComponent(f.name)},body:f});
+        const ej=await ex.json().catch(()=>({}));
+        if(ex.ok&&ej.ok&&ej.text)dc.content=String(ej.text).slice(0,50000);
+      }catch(_){}
+    }
+    persist();renderPdocs();
+  }
+  toast(files.length?('已上传入库（'+files.length+' 个文件）'):'未选择文件');
 }
 function pdOpenAdd(){pdafName.value='';pdafNote.value='';pdafDate.value=today();openMask('mPdAdd')}
 function pdAddConfirm(){
@@ -325,7 +345,10 @@ function pdAddConfirm(){
 function pdView(id){const r=pdFind(id);if(!r)return;const dc=r.list[r.i];
   document.getElementById('docViewTitle').textContent=dc.name+'（'+dc.date+'）';
   document.getElementById('docViewBody').innerHTML=dc.content;openMask('mDocView')}
-function pdDel(id){const r=pdFind(id);if(!r)return;if(!confirm('删除该文档记录？'))return;r.list.splice(r.i,1);persist();renderPdocs()}
+function pdDel(id){const r=pdFind(id);if(!r)return;const dc=r.list[r.i];
+  if(!confirm(dc&&dc.fileId?'删除该文档记录？其已入库的原件会一并删除':'删除该文档记录？'))return;
+  if(dc&&dc.fileId)fetch('/api/files/'+encodeURIComponent(dc.fileId),{method:'DELETE'}).catch(()=>{});
+  r.list.splice(r.i,1);persist();renderPdocs()}
 function pdMove(id){const r=pdFind(id);if(!r)return;
   pdPending={kind:'move',id,pid:pdPid};
   document.getElementById('pdmTitle').textContent='移动文档：'+r.list[r.i].name;
@@ -877,7 +900,7 @@ function renderDash(){
 
 /* ================= 数据备份 ================= */
 function exportAll(){download('售前工作台数据备份-'+today()+'.json',JSON.stringify(store,null,2),'application/json');toast('已导出备份文件')}
-function importAll(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{store=JSON.parse(r.result);persist();show('dash');toast('导入成功')}catch(e){toast('文件格式错误')}};r.readAsText(f);inp.value=''}
+function importAll(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{store=JSON.parse(r.result);persist();show('dash');toast('导入成功');pushImportToServer()}catch(e){toast('文件格式错误')}};r.readAsText(f);inp.value=''}
 
 /* ================= 通用页面项目选择器 ================= */
 function projSelectHtml(id,onchange,opts={}){
@@ -1336,5 +1359,157 @@ function seed(){
   persist();
 }
 
+/* ================= 服务端落库同步（store → BFF /api/state → SQLite） =================
+ * 事实来源在服务器；localStorage 降级为「秒开缓存 + 断网兜底」。原 49 处 persist() 调用点一行不改。
+ * 粒度：store 的每个顶层集合 = state 表一行，只推内容变了的集合（800ms 去抖 + 串行，避免互相抢写）。
+ * 判定（boot 与轮询同一套规则）：
+ *   1) 本机与库内容一致                    → 不动
+ *   2) 本机内容 == 上次同步成功的快照       → 本机没改过，跟随库（同事的改动拉下来）
+ *   3) 其余（本机改过 / 首次上云 / 本机把该集合清空）→ 以本机为准上传
+ * 覆盖库之前会把本机全量快照存进 localStorage['presales_workbench_v1_legacy']（每会话一次），防误覆盖。
+ * rev 冲突（拉到数据与写回之间同事又改了）→ 提示后强制覆盖，服务器 rev +1。
+ */
+var SYNC_COLLECTIONS=['projects','kb','docs','tasks','kbTree','pdocs','checklists','stakeholders','contracts','quotations','compintel','requirements'];
+var SYNC_LABEL={projects:'项目',kb:'知识库',docs:'方案文档',tasks:'任务',kbTree:'知识库目录',pdocs:'项目资料',checklists:'检查清单',stakeholders:'干系人',contracts:'合同',quotations:'报价',compintel:'竞争情报',requirements:'需求'};
+var SYNC_POLL_MS=60000;
+var _rev={}, _sent={}, _online=false, _lastErr='', _pushTimer=null, _pushing=false, _pushAgain=false, _legacyGuard=false;
+// 浏览器实例标识：无鉴权场景下写进库的 updated_by，出问题时能区分是哪台机器写的
+var CLIENT_TAG=(function(){try{var v=localStorage.getItem('pw_client');if(!v){v='c'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);localStorage.setItem('pw_client',v)}return v}catch(e){return 'anon'}})();
+
+function _j(v){return JSON.stringify(v===undefined?null:v)}
+function _empty(v){if(v==null)return true;if(Array.isArray(v))return v.length===0;if(typeof v==='object')return Object.keys(v).length===0;return false}
+function _dirtyNow(k){return _sent[k]!==_j(store[k])}
+function _pendingKeys(){var a=[];for(var i=0;i<SYNC_COLLECTIONS.length;i++){if(_dirtyNow(SYNC_COLLECTIONS[i]))a.push(SYNC_COLLECTIONS[i])}return a}
+function _markSynced(){for(var i=0;i<SYNC_COLLECTIONS.length;i++){var k=SYNC_COLLECTIONS[i];_sent[k]=_j(store[k])}}
+function _guardLegacy(){if(_legacyGuard)return;_legacyGuard=true;try{localStorage.setItem('presales_workbench_v1_legacy',_j({savedAt:new Date().toISOString(),store:store}))}catch(e){}}
+function currentPage(){var el=document.querySelector('.page.on');return el?el.id.slice(2):'dash'}
+function rerender(){try{show(currentPage())}catch(e){}}
+
+function schedulePush(){clearTimeout(_pushTimer);_pushTimer=setTimeout(function(){pushChanged()},800);renderSyncState()}
+
+async function pushChanged(){
+  if(_pushing){_pushAgain=true;return}
+  _pushing=true;renderSyncState();
+  try{
+    for(var i=0;i<SYNC_COLLECTIONS.length;i++){
+      var k=SYNC_COLLECTIONS[i];
+      var payload=_j(store[k]);
+      if(_sent[k]===payload)continue;
+      var ok=await pushOne(k,payload,false);
+      // 推送期间内容又变了就不更新快照，下一轮继续推
+      if(ok&&_j(store[k])===payload)_sent[k]=payload;
+    }
+  }finally{_pushing=false}
+  if(_pushAgain){_pushAgain=false;schedulePush()}
+  renderSyncState();
+}
+
+async function pushOne(k,payload,force){
+  var body={data:JSON.parse(payload),by:CLIENT_TAG};
+  if(!force&&_rev[k]!=null)body.rev=_rev[k];
+  if(force)body.force=true;
+  try{
+    var r=await fetch('/api/state/'+encodeURIComponent(k),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    if(r.status===409){
+      toast('「'+(SYNC_LABEL[k]||k)+'」同事刚改过，已按你这份覆盖');
+      r=await fetch('/api/state/'+encodeURIComponent(k),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({data:JSON.parse(payload),by:CLIENT_TAG,force:true})});
+    }
+    if(!r.ok){var ej=await r.json().catch(function(){return {}});throw new Error(ej.error||('HTTP '+r.status))}
+    var j=await r.json();
+    _rev[k]=j.rev;_online=true;_lastErr='';
+    return true;
+  }catch(e){
+    _online=false;_lastErr=(e&&e.message)||'写入失败';
+    toast('保存到服务器失败：'+_lastErr+'（本机已留缓存，可点「立即同步」重试）');
+    renderSyncState();
+    return false;
+  }
+}
+
+/** 拉服务器数据并按规则双向同步；isBoot 时不做「同事改动」提示 */
+async function pullState(isBoot){
+  var r=null;
+  try{r=await fetch(isBoot?'/api/state':'/api/state?meta=1',{cache:'no-store'})}catch(e){_online=false;_lastErr='网络不可达';renderSyncState();return}
+  if(!r||!r.ok){_online=false;_lastErr='HTTP '+(r?r.status:'?');renderSyncState();return}
+  var j=await r.json().catch(function(){return null});
+  if(!j||!j.states){_online=false;_lastErr='响应异常';renderSyncState();return}
+  _online=true;_lastErr='';
+  var st=j.states, ups=[], downs=[];
+  if(isBoot){
+    // 全量比对：库里内容缺失/为空而本机非空 → 上传（首次上云）；本机没改过 → 跟随库；本机改过 → 上传
+    for(var i=0;i<SYNC_COLLECTIONS.length;i++){
+      var k=SYNC_COLLECTIONS[i], row=st[k], loc=store[k];
+      if(row)_rev[k]=row.rev;
+      var locJ=_j(loc), srvJ=row?_j(row.data):null;
+      if(row&&locJ===srvJ)continue;                                              // 1 内容一致 → 不动
+      if((!row||_empty(row.data))&&!_empty(loc)){ups.push(k);continue}           // 2 库里空/缺失 → 本机上传
+      if(_sent[k]!==undefined&&locJ===_sent[k]){if(row)downs.push(k);continue}   // 3 本机没改过 → 跟随库
+      if(!_empty(loc)||_sent[k]!==undefined)ups.push(k);                         // 4 本机改过（含主动清空）→ 上传
+      else if(row&&!_empty(row.data))downs.push(k);                              // 5 本机确实空 → 用库
+    }
+    if(downs.length){_guardLegacy();for(var d=0;d<downs.length;d++){var kd=downs[d];store[kd]=st[kd].data;_sent[kd]=_j(store[kd])}}
+    for(var u=0;u<ups.length;u++){var ku=ups[u];var pay=_j(store[ku]);if(await pushOne(ku,pay,true))_sent[ku]=pay}
+  }else{
+    // 轮询：只比 rev。本机有改动 → 带 rev 上传（服务器 rev 更新则 409 → 提示后覆盖）；本机干净但库变了 → 只下载这些集合
+    for(var i2=0;i2<SYNC_COLLECTIONS.length;i2++){
+      var k2=SYNC_COLLECTIONS[i2], row2=st[k2];
+      if(_dirtyNow(k2)){var pay2=_j(store[k2]);if(await pushOne(k2,pay2,false))_sent[k2]=pay2;continue}
+      if(!row2||_sent[k2]===undefined)continue;
+      if(_rev[k2]===undefined||row2.rev!==_rev[k2])downs.push(k2);
+    }
+    if(downs.length)await downloadKeys(downs);
+  }
+  if(downs.length){rerender();if(!isBoot)toast('已同步同事的最新数据')}
+  renderSyncState();
+}
+
+/** 精准下载若干集合（轮询用，避免重复拉全量） */
+async function downloadKeys(keys){
+  try{
+    var r=await fetch('/api/state?keys='+encodeURIComponent(keys.join(',')),{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    var j=await r.json();
+    _guardLegacy();
+    for(var i=0;i<keys.length;i++){
+      var k=keys[i], row=j.states&&j.states[k];
+      if(!row)continue;
+      store[k]=row.data;_sent[k]=_j(row.data);_rev[k]=row.rev;
+    }
+  }catch(e){_lastErr=(e&&e.message)||'下载失败';renderSyncState()}
+}
+
+function syncNow(){pullState(false).then(function(){return pushChanged()}).then(function(){toast('已同步')})}
+
+/** 导入备份后整体落库：一次批量强制写入，避免逐集合撞 rev */
+async function pushImportToServer(){
+  var states={};
+  for(var i=0;i<SYNC_COLLECTIONS.length;i++){var k=SYNC_COLLECTIONS[i];states[k]=store[k]===undefined?null:store[k]}
+  try{
+    var r=await fetch('/api/state/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({states:states,by:CLIENT_TAG})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    var j=await r.json();
+    for(var w=0;w<(j.written||[]).length;w++){var wk=j.written[w];_rev[wk.key]=wk.rev;_sent[wk.key]=_j(store[wk.key])}
+    _online=true;_lastErr='';toast('导入数据已存入服务器');renderSyncState();
+  }catch(e){_online=false;_lastErr=(e&&e.message)||'写入失败';toast('导入数据上传失败（本机已生效）：'+_lastErr+'，可点「立即同步」重试');renderSyncState()}
+}
+
+function renderSyncState(){
+  var el=document.getElementById('syncState');if(!el)return;
+  var pend=_pendingKeys().length;
+  var txt,color;
+  if(!_online){txt='离线·仅存本机'+(_lastErr?('（'+_lastErr+'）'):'');color='#e0a800'}
+  else if(_pushing){txt='同步中…';color='#4a90d9'}
+  else if(pend){txt='待同步 '+pend+' 项';color='#e0a800'}
+  else {txt='已同步';color='#2e9e5b'}
+  el.textContent='● '+txt;el.style.color=color;
+  el.title=_online?('业务数据存服务器 SQLite；本机浏览器另有缓存。'+(pend?'还有 '+pend+' 个集合未上传':'全部已上传'))
+    :('服务器暂不可达（'+_lastErr+'），数据先存本机，恢复后自动补传');
+}
+
 /* ================= 启动 ================= */
 load();seed();renderDash();renderProjects();
+_markSynced();                       // 先把本机现状当作「已同步基线」，之后的差异才算改动
+pullState(true).then(function(){
+  setInterval(function(){if(!document.hidden)pullState(false)},SYNC_POLL_MS);
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)pullState(false)});
+});

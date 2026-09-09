@@ -27,9 +27,10 @@
       <button data-p="requirements"><span class="ico">📋</span>需求管理</button>
     </nav>
     <div class="side-foot">
-      数据保存在本机浏览器
+      数据存服务器 <span id="syncState" title="业务数据已落库 SQLite；本机浏览器另留一份缓存">●</span>
       <button onclick="exportAll()">⬇ 导出数据备份</button>
       <button onclick="document.getElementById('importFile').click()">⬆ 导入数据</button>
+      <button onclick="syncNow()">⟳ 立即同步</button>
       <input type="file" id="importFile" accept=".json" style="display:none" onchange="importAll(this)">
     </div>
   </aside>

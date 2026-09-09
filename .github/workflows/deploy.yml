@@ -32,6 +32,8 @@ jobs:
         run: |
           node --version
           node --check server/index.js
+          node --check server/db.js
+          node --check frontend/src/kb-weknora.js
           node --check server/hermes.js
           node --check frontend/src/main.js
           node --check frontend/src/hermes-chat.js

@@ -383,29 +383,110 @@ async function handleCatMapPut(req, res) {
   return sendJson(res, 200, { ok: true, docId, catId })
 }
 
-/* ---------------- 通用文件上传/下载（Excel、合同附件等二进制文件） ---------------- */
+/* ---------------- 工作台业务数据落库（SQLite） ----------------
+   前端 store 的每个顶层集合（projects/docs/pdocs/…）= state 表一行；
+   localStorage 降级为「秒开缓存 + 离线兜底」，服务器为唯一事实来源。
+   接口：GET /api/state｜GET /api/state/:key｜PUT /api/state/:key｜POST /api/state/import｜DELETE /api/state/:key */
+const DB = require('./db.js')
+const STATE_FILE = path.join(DATA_DIR, process.env.DB_FILE || 'presales.db')
+// 整块集合 JSON 可能远大于普通 API 请求（方案正文多、批量导入），单独放宽上限
+const MAX_STATE_BODY = Number(process.env.MAX_STATE_BODY || 16 * 1024 * 1024)
+let _dbReady = false
+try {
+  DB.init(STATE_FILE)
+  _dbReady = true
+  log('SQLite 就绪:', STATE_FILE, JSON.stringify(DB.info()))
+} catch (e) {
+  log('!! SQLite 初始化失败（/api/state 返回 503，前端自动退回浏览器本地模式）:', e && e.message)
+}
+
+function dbUnavailable(res) {
+  return sendJson(res, 503, { error: '数据库不可用', detail: 'SQLite 未就绪，前端将退回浏览器本地模式' })
+}
+
+/** GET /api/state[?meta=1][&keys=a,b]  meta=1 只回 rev/size/更新时间；keys 只回指定集合 */
+async function handleStateList(req, res, sp) {
+  if (!_dbReady) return dbUnavailable(res)
+  const metaOnly = !!(sp && sp.get('meta'))
+  const keysParam = sp ? sp.get('keys') : null
+  let states
+  if (keysParam) {
+    states = {}
+    for (const raw of String(keysParam).split(',')) {
+      const k = raw.trim()
+      if (!k) continue
+      try { const row = DB.get(k, !metaOnly); if (row) states[k] = row } catch (_) { /* 非法集合名忽略 */ }
+    }
+  } else {
+    states = DB.listAll(!metaOnly)
+  }
+  return sendJson(res, 200, { ok: true, states, meta: metaOnly, db: DB.info() })
+}
+
+async function handleStateGet(req, res, key) {
+  if (!_dbReady) return dbUnavailable(res)
+  let row
+  try { row = DB.get(key) } catch (e) { return sendJson(res, 400, { error: e.message }) }
+  if (!row) return sendJson(res, 404, { error: '集合不存在', key })
+  return sendJson(res, 200, { ok: true, key, ...row })
+}
+
+/** body: { data, rev?, by?, force? } → 200 {rev}｜409 {error:'rev_conflict'} */
+async function handleStatePut(req, res, key) {
+  if (!_dbReady) return dbUnavailable(res)
+  let body
+  try { body = await readBody(req, MAX_STATE_BODY) } catch (e) { return sendJson(res, 400, { error: e.message }) }
+  if (body.data === undefined) return sendJson(res, 400, { error: 'data 必填' })
+  let r
+  try { r = DB.put(key, body.data, { rev: body.rev, force: !!body.force, by: body.by }) }
+  catch (e) { return sendJson(res, 400, { error: e.message }) }
+  if (r.conflict) {
+    log(`state 冲突 ${key}：客户端想用 rev=${body.rev}，服务端已是 rev=${r.rev}（上次由 ${r.updated_by || '-'} 于 ${new Date(r.updated_at).toISOString()} 写入）`)
+    return sendJson(res, 409, { error: 'rev_conflict', key, ...r })
+  }
+  return sendJson(res, 200, { ok: true, ...r })
+}
+
+/** 批量写入：导入备份 / 首次上云迁移。body: { states: {key: data}, by? } */
+async function handleStateImport(req, res) {
+  if (!_dbReady) return dbUnavailable(res)
+  let body
+  try { body = await readBody(req, MAX_STATE_BODY) } catch (e) { return sendJson(res, 400, { error: e.message }) }
+  const states = body.states
+  if (!states || typeof states !== 'object' || Array.isArray(states)) return sendJson(res, 400, { error: 'states 必须是对象' })
+  const out = DB.putMany(states, { by: body.by, force: true })
+  log(`state 批量写入 ${out.written.length} 个集合${out.conflicts.length ? '，跳过冲突 ' + out.conflicts.length + ' 个' : ''}`)
+  return sendJson(res, 200, { ok: true, ...out, db: DB.info() })
+}
+
+async function handleStateDelete(req, res, key) {
+  if (!_dbReady) return dbUnavailable(res)
+  try { return sendJson(res, 200, { ok: true, ...DB.remove(key) }) }
+  catch (e) { return sendJson(res, 400, { error: e.message }) }
+}
+
+/* ---------------- 通用文件上传/下载（资料原件以 BLOB 存进 SQLite） ----------------
+   历史上原件写 data/files/ 目录 + files-index.json，「记录在库、原件在盘」是两套状态，迁盘/换机容易只保住一半；
+   现在统一进 presales.db 的 files 表。下载/删除仍先查库，查不到再回落旧目录，兼容历史文件。 */
+const MAX_DB_FILE = Number(process.env.MAX_DB_FILE || 32 * 1024 * 1024) // 单文件上限 32MB（容器整体内存上限 320MB）
 async function handleFileUpload(req, res) {
-  const MAX_FILE = 50 * 1024 * 1024 // 50MB
   let name = ''
   let buf
   try {
     name = decodeURIComponent(String(req.headers['x-filename'] || '').trim())
-    buf = await readRaw(req, MAX_FILE)
+    buf = await readRaw(req, MAX_DB_FILE)
   } catch (e) {
-    return sendJson(res, 413, { error: '文件过大或上传失败：' + e.message })
+    return sendJson(res, 413, { error: `文件过大或上传失败：${e.message}。单个文件上限 ${Math.round(MAX_DB_FILE / 1048576)}MB，建议压缩或拆分后重试。` })
   }
   if (!name) return sendJson(res, 400, { error: '缺少文件名' })
   if (!buf || !buf.length) return sendJson(res, 400, { error: '文件内容为空' })
   const fileId = uid() + path.extname(name).toLowerCase()
-  const filePath = path.join(FILE_DIR, fileId)
+  const scope = decodeURIComponent(String(req.headers['x-scope'] || '').trim()).slice(0, 127)
   try {
-    fs.mkdirSync(FILE_DIR, { recursive: true })
-    fs.writeFileSync(filePath, buf)
-    _filesIndex[fileId] = { name, size: buf.length, mime: mimeFromName(name), created: new Date().toISOString() }
-    saveFilesIndex()
-    return sendJson(res, 200, { ok: true, fileId, name, size: buf.length })
+    const out = DB.putFile({ id: fileId, name, mime: mimeFromName(name), scope, buf })
+    return sendJson(res, 200, { ...out, stored: 'sqlite' })
   } catch (e) {
-    log('保存上传文件失败:', e && e.message)
+    log('资料入库失败:', e && e.message)
     return sendJson(res, 500, { error: '保存文件失败：' + e.message })
   }
 }
@@ -422,29 +503,49 @@ function mimeFromName(name) {
   }
   return map[ext] || 'application/octet-stream'
 }
+function sendFileBuf(res, buf, mime, name) {
+  res.writeHead(200, {
+    'content-type': mime || 'application/octet-stream',
+    'content-length': buf.length,
+    'content-disposition': `attachment; filename="${encodeURIComponent(name || 'file')}"`,
+  })
+  res.end(buf)
+}
 async function handleFileDownload(req, res, fileId) {
   if (!fileId) return sendJson(res, 400, { error: '缺少文件 ID' })
-  const meta = _filesIndex[fileId]
-  const filePath = path.join(FILE_DIR, fileId)
+  if (_dbReady) {
+    const f = DB.getFile(fileId)
+    if (f) return sendFileBuf(res, f.buf, f.mime, f.name)
+  }
+  const meta = _filesIndex[fileId] // 回落：历史磁盘文件
   try {
-    const buf = fs.readFileSync(filePath)
-    res.writeHead(200, {
-      'content-type': meta && meta.mime ? meta.mime : 'application/octet-stream',
-      'content-length': buf.length,
-      'content-disposition': `attachment; filename="${encodeURIComponent(meta && meta.name ? meta.name : fileId)}"`,
-    })
-    res.end(buf)
+    const buf = fs.readFileSync(path.join(FILE_DIR, fileId))
+    return sendFileBuf(res, buf, meta && meta.mime, meta && meta.name ? meta.name : fileId)
   } catch (e) {
     return sendJson(res, 404, { error: '文件不存在或已删除' })
   }
 }
 async function handleFileDelete(req, res, fileId) {
   if (!fileId) return sendJson(res, 400, { error: '缺少文件 ID' })
-  const filePath = path.join(FILE_DIR, fileId)
-  try { fs.unlinkSync(filePath) } catch (_) {}
-  delete _filesIndex[fileId]
-  saveFilesIndex()
-  return sendJson(res, 200, { ok: true, fileId })
+  let deleted = false
+  if (_dbReady) { try { deleted = DB.delFile(fileId).deleted } catch (e) { return sendJson(res, 400, { error: e.message }) } }
+  if (!deleted) {
+    try { fs.unlinkSync(path.join(FILE_DIR, fileId)); deleted = true } catch (_) {}
+    if (_filesIndex[fileId]) { delete _filesIndex[fileId]; saveFilesIndex() }
+  }
+  return sendJson(res, 200, { ok: true, fileId, deleted })
+}
+/** GET /api/files[?scope=前缀] → 资料清单（库内条目 + 旧磁盘索引里还没入库的） */
+async function handleFileList(req, res, sp) {
+  if (!_dbReady) return dbUnavailable(res)
+  const scope = decodeURIComponent(String((sp && sp.get('scope')) || '')).slice(0, 127)
+  const files = DB.listFiles(scope)
+  for (const [id, m] of Object.entries(_filesIndex)) {
+    if (files.some(f => f.fileId === id)) continue
+    if (scope && String(id).indexOf(scope) !== 0) continue
+    files.push({ fileId: id, name: m.name, mime: m.mime, size: m.size, scope: '', created_at: Date.parse(m.created || '') || 0, stored: 'disk' })
+  }
+  return sendJson(res, 200, { ok: true, files, db: DB.info() })
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 9) }
 
@@ -465,6 +566,7 @@ async function handleHealth(req, res) {
     pool: pool.stats(),
     memoryMB: Math.round(process.memoryUsage().rss / 1048576),
     node: process.version,
+    db: _dbReady ? (() => { try { return DB.info() } catch (e) { return { error: e.message } } })() : { error: 'unavailable' },
   }
   try {
     const r = await fetchWithTimeout(out.hermesUrl + '/', { method: 'GET' }, HERMES_TIMEOUT_MS)
@@ -492,11 +594,34 @@ const server = http.createServer(async (req, res) => {
 
     /* 通用文件上传/下载 */
     if (url === '/api/files/upload' && req.method === 'POST') return void (await handleFileUpload(req, res))
+    if ((url === '/api/files' || url.startsWith('/api/files?')) && req.method === 'GET') {
+      const sp = new URL(url, 'http://localhost').searchParams
+      return void (await handleFileList(req, res, sp))
+    }
     if (url.startsWith('/api/files/download/') && req.method === 'GET') {
       return void (await handleFileDownload(req, res, decodeURIComponent(url.slice('/api/files/download/'.length).split('?')[0])))
     }
     if (url.startsWith('/api/files/') && req.method === 'DELETE') {
       return void (await handleFileDelete(req, res, decodeURIComponent(url.slice('/api/files/'.length).split('?')[0])))
+    }
+
+    /* 工作台业务数据（SQLite） */
+    if (url.startsWith('/api/state')) {
+      const p = url.split('?')[0]
+      if (p === '/api/state' || p === '/api/state/') {
+        if (req.method === 'GET') {
+          const sp = new URL(url, 'http://localhost').searchParams
+          return void (await handleStateList(req, res, sp))
+        }
+        return sendJson(res, 405, { error: 'method not allowed' })
+      }
+      if (p === '/api/state/import' && req.method === 'POST') return void (await handleStateImport(req, res))
+      const key = decodeURIComponent(p.slice('/api/state/'.length))
+      if (!key) return sendJson(res, 400, { error: '缺少集合名' })
+      if (req.method === 'GET') return void (await handleStateGet(req, res, key))
+      if (req.method === 'PUT') return void (await handleStatePut(req, res, key))
+      if (req.method === 'DELETE') return void (await handleStateDelete(req, res, key))
+      return sendJson(res, 405, { error: 'method not allowed' })
     }
 
     /* WeKnora 代理：前端通过 BFF 间接访问 WeKnora，避免暴露 API Key 与 8080 端口 */
