@@ -65,7 +65,9 @@ async function loadWeKnoraKb(force) {
     WEK.kbs = kbs
     const last = (function () { try { return localStorage.getItem('wek_kb') } catch (e) { return '' } })()
     const cfg = WEK.kbId
-    const pick = [cfg, last].find(id => id && kbs.some(k => k.id === id)) || (kbs[0] && kbs[0].id) || ''
+    const visible = id => !!id && kbs.some(k => k.id === id)
+    const richest = kbs.slice().sort((a, b) => (b.docs || 0) - (a.docs || 0))[0]
+    const pick = [cfg, last].find(visible) || (richest && (richest.docs ? richest.id : (kbs[0] && kbs[0].id))) || ''
     WEK.kbId = pick
     const q = pick ? `?kb=${encodeURIComponent(pick)}` : ''
     const [baseRes, listRes] = await Promise.all([
