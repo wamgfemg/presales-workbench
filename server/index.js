@@ -549,6 +549,37 @@ async function handleFileList(req, res, sp) {
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 9) }
 
+/* ---------------- AI 投入决策复核（GO / NO-GO） ----------------
+   打分在前端本地算完，这里只把结构化指标交给 Hermes 做一次「要不要投」的复核并返回原文，
+   由前端解析 JSON。会话按项目隔离（key=ai-go:<pid>），保留该项目上下文又不污染方案制作中心的会话。 */
+async function handleAiJudge(req, res) {
+  let body
+  try { body = await readBody(req, 256 * 1024) } catch (e) { return sendJson(res, 400, { error: e.message }) }
+  const prompt = String(body.prompt || '').trim()
+  if (!prompt) return sendJson(res, 400, { error: 'prompt 不能为空' })
+  const key = 'ai-go:' + String(body.projectId || 'misc').slice(0, 64)
+  const run = async () => {
+    const sess = pool.get(key)
+    if (!sess.connected) await sess.open()
+    const r = await sess.submit(prompt)
+    pool.recordSession(key, r.sessionId, r.storedSessionId)
+    return r
+  }
+  try {
+    const r = await run()
+    return sendJson(res, 200, { ok: true, text: r.text || '', usage: r.usage || null, sessionId: r.sessionId })
+  } catch (e) {
+    log('AI 复核首次失败，重建会话重试:', e && e.message)
+    pool.drop(key)
+    try {
+      const r2 = await run()
+      return sendJson(res, 200, { ok: true, text: r2.text || '', usage: r2.usage || null, sessionId: r2.sessionId, retried: true })
+    } catch (e2) {
+      return sendJson(res, 502, { error: 'AI 复核失败：' + ((e2 && e2.message) || e2) })
+    }
+  }
+}
+
 /* ---------------- 健康检查（带 TTL 缓存，避免前端每 60s 轮询都打外部依赖） ---------------- */
 async function handleHealth(req, res) {
   if (Date.now() - _healthCache.at < HEALTH_TTL_MS && _healthCache.data) {
@@ -591,6 +622,7 @@ const server = http.createServer(async (req, res) => {
     if (url.startsWith('/api/sessions') && req.method === 'GET') return void (await handleSessions(req, res))
     if (url.startsWith('/api/session/attach') && req.method === 'POST') return void (await handleAttach(req, res))
     if (url.startsWith('/api/health')) return void (await handleHealth(req, res))
+    if (url === '/api/ai/judge' && req.method === 'POST') return void (await handleAiJudge(req, res))
 
     /* 通用文件上传/下载 */
     if (url === '/api/files/upload' && req.method === 'POST') return void (await handleFileUpload(req, res))
