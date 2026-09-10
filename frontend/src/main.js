@@ -17,6 +17,34 @@ function fmtWan(n){n=num0(n);return n%1===0?String(n):n.toFixed(1)}
 function amountsOf(p){const a=(p&&p.amounts)||{};return{est:num0(a.estTotal),sw:num0(a.software),won:num0(a.won),cost:num0(a.cost)}}
 function marginOf(p){const m=amountsOf(p);const profit=m.won?+(m.won-m.cost).toFixed(1):0;const rate=m.won?Math.round(profit/m.won*1000)/10:null;return Object.assign({},m,{profit,rate})}
 function oppBadge(l){if(!l)return '—';const cls=l==='控单'?'b-win':l==='博弈'?'b-plan':'b-pre';return `<span class="badge ${cls}">${esc(l)}</span>`}
+/* ===== 全局年度维度：工作台/项目/决策链/情报/报价/合同 统一按年度取数 ===== */
+const YEAR_LS_KEY='pw_year_filter';
+let fyYear=(function(){try{return localStorage.getItem(YEAR_LS_KEY)||'all'}catch(e){return 'all'}})();
+function projYearOf(p){
+  const s=String((p&&(p.actualSignMonth||p.expectSignMonth||p.keyDate||p.created))||'');
+  const m=s.match(/^(19|20)\d{2}/);return m?m[0]:''
+}
+function projYears(){
+  const set=new Set();store.projects.forEach(p=>{const y=projYearOf(p);if(y)set.add(y)});
+  const now=new Date().getFullYear();set.add(String(now));set.add(String(now-1));
+  return [...set].sort((a,b)=>b.localeCompare(a))
+}
+function inYear(p){return fyYear==='all'||projYearOf(p)===fyYear}
+function projectsInView(){return fyYear==='all'?store.projects:store.projects.filter(inYear)}
+function setFyYear(v){
+  fyYear=v||'all';try{localStorage.setItem(YEAR_LS_KEY,fyYear)}catch(e){}
+  /* 年度是全局口径：一次把所有页面重渲染，避免只刷当前页导致别处口径不一致；按名字取函数，缺哪个跳过哪个 */
+  ['renderDash','renderProjects','renderChain','renderCompintel','renderQuotations','renderContracts','renderStakeholders',
+   'renderPdocs','renderTools','renderC139','renderRequirements','renderDocs'].forEach(n=>{
+    try{const f=window[n];if(typeof f==='function')f()}catch(e){}
+  })
+}
+function yearSelectHtml(id){
+  return `<select id="${id||'fyYearSel'}" onchange="setFyYear(this.value)" title="年度口径：实际签约月 > 预计签约月 > 关键日期 > 创建日期" style="min-width:104px">
+    <option value="all"${fyYear==='all'?' selected':''}>全部年度</option>
+    ${projYears().map(y=>`<option value="${y}"${y===fyYear?' selected':''}>${y} 年</option>`).join('')}</select>`
+}
+function yearTag(){return fyYear==='all'?'全部年度':fyYear+' 年'}
 function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify(store))}catch(e){}try{schedulePush()}catch(e){}}
 function load(){try{const s=localStorage.getItem(LS_KEY);if(s)store=JSON.parse(s)}catch(e){}
   if(!store.projects)store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
@@ -141,48 +169,81 @@ function addTl(p,text){p.timeline=p.timeline||[];p.timeline.unshift({d:today(),t
 function delProject(id){if(!confirm('确定删除该项目？'))return;store.projects=store.projects.filter(p=>p.id!==id);persist();renderProjects();toast('已删除')}
 
 let projSort={k:'',d:1};
+const PF={year:'all',range:'all',stage:'all',opp:'all',owner:'',warn:'',kw:''};
+const RANGES={all:'全部',active:'在跟',won:'已中标',lost:'已流失',closed:'已收口'};
+function inRange(p,r){
+  const won=p.stage==='已中标', lost=LOST_STAGES.includes(p.stage);
+  if(r==='active')return !won&&!lost;
+  if(r==='won')return won;
+  if(r==='lost')return lost;
+  if(r==='closed')return won||lost;
+  return true}
+function projWarnFlags(p){
+  return {over:(p.nextSteps||[]).some(s=>!s.done&&s.due&&dueState(s.due)==='over'),
+    risk:(p.risks||[]).some(r=>r.level==='高'&&r.status!=='已关闭')}}
+function projHasWarn(p){const f=projWarnFlags(p);return f.over||f.risk}
 function projVal(p,k){switch(k){
   case 'name':return p.name||'';case 'customer':return p.customer||'';
   case 'stage':return STAGES.indexOf(p.stage);case 'oppLevel':return OPP_LEVELS.indexOf(p.oppLevel);
   case 'est':return amountsOf(p).est;case 'sw':return amountsOf(p).sw;
+  case 'won':return amountsOf(p).won;case 'cost':return amountsOf(p).cost;
+  case 'profit':return marginOf(p).profit;case 'margin':return marginOf(p).rate==null?-1:marginOf(p).rate;
+  case 'wgt':return amountsOf(p).est*c139Stats(p.c139).rate/100;
   case 'rate':return c139Stats(p.c139).rate;case 'expect':return p.expectSignMonth||p.keyDate||'';
+  case 'year':return projYearOf(p);
   case 'sales':return p.sales||'';case 'presales':return p.presales||'';default:return 0}}
 function sortProjects(k){if(projSort.k===k)projSort.d=-projSort.d;else{projSort.k=k;projSort.d=1}renderProjects()}
 function pth(k,label,style){const on=projSort.k===k;
   return `<th class="sortable${on?' on':''}"${style?` style="${style}"`:''} onclick="sortProjects('${k}')">${label}${on?`<i>${projSort.d>0?'▲':'▼'}</i>`:''}</th>`}
-function projHasWarn(p){
-  return (p.nextSteps||[]).some(s=>!s.done&&s.due&&dueState(s.due)==='over')
-    || (p.risks||[]).some(r=>r.level==='高'&&r.status!=='已关闭')}
+function pfSet(k,v){PF[k]=v;renderProjects()}
+/** 首页等处的点击跳转：带着条件跳到项目清单 */
+function goProjects(o){
+  o=o||{};
+  if(o.year)PF.year=o.year;
+  PF.range=o.range||'all';PF.stage=o.stage||'all';PF.opp=o.opp||'all';PF.warn=o.warn||'';PF.owner='';
+  if(o.sort){projSort.k=o.sort;projSort.d=o.desc===false?1:-1}else{projSort.k='';projSort.d=-1}
+  show('projects')
+}
 function renderProjects(){
-  const kw=(document.getElementById('projSearch').value||'').toLowerCase();
-  const st=document.getElementById('projStageFilter').value;
-  const opp=document.getElementById('projOppFilter').value;
+  const kw=(document.getElementById('projSearch').value||'').toLowerCase();PF.kw=kw;
+  const ySel=document.getElementById('projYearFilter');
+  const ys=projYears();
+  ySel.innerHTML='<option value="all">全部年度</option>'+ys.map(y=>`<option value="${y}">${y} 年</option>`).join('');
+  ySel.value=PF.year==='all'||ys.includes(PF.year)?PF.year:'all';PF.year=ySel.value;
+  const setVal=(id,v)=>{const e=document.getElementById(id);if(e)e.value=v};
+  setVal('projRangeFilter',PF.range);setVal('projStageFilter',PF.stage);setVal('projOppFilter',PF.opp);setVal('projWarnFilter',PF.warn);
   const owSel=document.getElementById('projOwnerFilter');
-  const names=[...new Set(store.projects.flatMap(p=>[p.sales,p.presales].filter(Boolean)))].sort((a,b)=>String(a).localeCompare(String(b),'zh'));
-  const oc=owSel.value;
+  const names=[...new Set(projectsInView().flatMap(p=>[p.sales,p.presales].filter(Boolean)))].sort((a,b)=>String(a).localeCompare(String(b),'zh'));
   owSel.innerHTML='<option value="">全部负责人</option>'+names.map(n=>`<option>${esc(n)}</option>`).join('');
-  if(names.includes(oc))owSel.value=oc;
-  const ow=owSel.value;
-  const warn=document.getElementById('projWarnFilter').value==='warn';
-  let list=store.projects.filter(p=>
-    (st==='all'||p.stage===st)
-    &&(opp==='all'||p.oppLevel===opp)
-    &&(!ow||p.sales===ow||p.presales===ow)
-    &&(!warn||projHasWarn(p))
+  owSel.value=names.includes(PF.owner)?PF.owner:'';PF.owner=owSel.value;
+  const list=projectsInView().filter(p=>
+    (PF.year==='all'||projYearOf(p)===PF.year)
+    &&inRange(p,PF.range)
+    &&(PF.stage==='all'||p.stage===PF.stage)
+    &&(PF.opp==='all'||p.oppLevel===PF.opp)
+    &&(!PF.owner||p.sales===PF.owner||p.presales===PF.owner)
+    &&(!PF.warn||(PF.warn==='warn'?projHasWarn(p):projWarnFlags(p)[PF.warn]))
     &&(!kw||(p.name+p.customer+(p.sales||'')+(p.presales||'')).toLowerCase().includes(kw)));
-  if(projSort.k)list=list.slice().sort((a,b)=>{
+  const sorted=projSort.k?list.slice().sort((a,b)=>{
     const x=projVal(a,projSort.k),y=projVal(b,projSort.k);
     const c=(typeof x==='number'&&typeof y==='number')?(x-y):String(x).localeCompare(String(y),'zh');
-    return c*projSort.d});
+    return c*projSort.d}):list;
+  const cond=[];if(PF.year!=='all')cond.push(PF.year+' 年');if(PF.range!=='all')cond.push(RANGES[PF.range]);
+  if(PF.stage!=='all')cond.push(PF.stage);if(PF.opp!=='all')cond.push(PF.opp);
+  if(PF.owner)cond.push(PF.owner);if(PF.warn)cond.push(PF.warn==='warn'?'有预警':PF.warn==='over'?'逾期下一步':'高风险');
+  const cnt=document.getElementById('projCount');
+  if(cnt)cnt.innerHTML=`共 <b>${sorted.length}</b> 个项目${cond.length?' · 条件：'+cond.join(' / '):''} · 预估合计 <b>${fmtWan(Math.round(sorted.reduce((s,p)=>s+amountsOf(p).est,0)*10)/10)}</b> 万`;
   const t=document.getElementById('projTable');
-  if(!list.length){t.innerHTML='<tr><td colspan="11"><div class="empty">没有符合条件的项目</div></td></tr>';return}
-  t.innerHTML=`<tr>${pth('name','项目')}${pth('customer','甲方')}${pth('stage','阶段')}${pth('oppLevel','商机级别')}
-    ${pth('est','预估(万)')}${pth('sw','软件(万)')}${pth('rate','C139赢单率')}${pth('expect','预计签约')}${pth('sales','销售')}${pth('presales','售前')}
+  if(!sorted.length){t.innerHTML='<tr><td colspan="12"><div class="empty">没有符合条件的项目</div></td></tr>';return}
+  t.innerHTML=`<tr>${pth('name','项目')}${pth('customer','甲方')}${pth('year','年度')}${pth('stage','阶段')}${pth('oppLevel','商机级别')}
+    ${pth('est','预估(万)')}${pth('wgt','加权(万)')}${pth('rate','C139赢单率')}${pth('expect','预计签约')}${pth('sales','销售')}${pth('presales','售前')}
     <th style="width:170px">操作</th></tr>`+
-  list.map(p=>{const s=c139Stats(p.c139);const m=amountsOf(p);const warn2=projHasWarn(p);return `<tr>
-    <td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${p.id}')">${esc(p.name)}</b>${warn2?' <span class="tag" style="background:#fde8ef;color:var(--bad)" title="有逾期下一步或高风险未关闭">预警</span>':''}</td>
-    <td>${esc(p.customer)}</td><td>${stageBadge(p.stage)}</td><td>${oppBadge(p.oppLevel)}</td>
-    <td>${m.est?fmtWan(m.est):'—'}</td><td>${m.sw?fmtWan(m.sw):'—'}</td>
+  sorted.map(p=>{const s=c139Stats(p.c139);const m=amountsOf(p);const w=projWarnFlags(p);return `<tr>
+    <td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${p.id}')">${esc(p.name)}</b>
+      ${w.over?' <span class="tag" style="background:#fde8ef;color:var(--bad)" title="有逾期下一步">逾期</span>':''}
+      ${w.risk?' <span class="tag" style="background:#fde8ef;color:var(--bad)" title="有高风险未关闭">高风险</span>':''}</td>
+    <td>${esc(p.customer)}</td><td>${esc(projYearOf(p)||'—')}</td><td>${stageBadge(p.stage)}</td><td>${oppBadge(p.oppLevel)}</td>
+    <td>${m.est?fmtWan(m.est):'—'}</td><td style="color:var(--sub)">${m.est?fmtWan(Math.round(m.est*s.rate)/100):'—'}</td>
     <td><div class="wr"><span class="pct" style="color:${s.rate>=85?'var(--ok)':s.rate>=50?'#b25e0c':'var(--bad)'}">${s.rate}%</span>${zoneBadge(s.zone)}</div></td>
     <td>${esc(p.expectSignMonth||p.keyDate||'—')}</td><td>${esc(p.sales||'—')}</td><td>${esc(p.presales||'—')}</td>
     <td><button class="btn sm ghost" onclick="openDetail('${p.id}')">详情</button>
@@ -347,7 +408,7 @@ function pdCount(pid){const d=store.pdocs[pid];if(!d)return 0;return d.input.len
 function fmtSize(b){return !b?'—':b>1048576?(b/1048576).toFixed(1)+' MB':b>1024?(b/1024).toFixed(0)+' KB':b+' B'}
 function renderPdocs(){
   const tree=document.getElementById('pdTree');
-  tree.innerHTML=store.projects.map(p=>`<div class="pnode ${p.id===pdPid?'on':''}" onclick="pdPid='${p.id}';pdFolder='root';renderPdocs()">
+  tree.innerHTML=projectsInView().map(p=>`<div class="pnode ${p.id===pdPid?'on':''}" onclick="pdPid='${p.id}';pdFolder='root';renderPdocs()">
     <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</span>
     <span class="sub-cnt">${pdCount(p.id)} 文档</span></div>`).join('')||'<div class="empty">暂无项目</div>';
   const el=document.getElementById('pdRight');
@@ -498,7 +559,7 @@ function fv(k){return (CUR_A&&String(CUR_A[k]||'')).trim()}
 function renderDocsPage(){
   const sel=document.getElementById('docProj');
   const prev=sel.value||(curTaskId&&getTask(curTaskId)?getTask(curTaskId).projectId:'')||currentProjectId||'';
-  sel.innerHTML='<option value="">— 请选择项目 —</option>'+store.projects.filter(p=>!['已中标','已流标','已输标'].includes(p.stage)).map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('');
+  sel.innerHTML='<option value="">— 请选择项目 —</option>'+projectsInView().filter(p=>!['已中标','已流标','已输标'].includes(p.stage)).map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('');
   if(prev&&store.projects.some(p=>p.id===prev))sel.value=prev;
   renderTypeCards();renderTaskList();renderRightPanel();
 }
@@ -888,7 +949,7 @@ function doInsert(id){
 function renderC139(){
   const sel=document.getElementById('c139Proj');
   const prev=sel.value||currentProjectId;
-  sel.innerHTML=store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')||'<option value="">暂无项目，请先创建</option>';
+  sel.innerHTML=projectsInView().map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')||'<option value="">暂无项目，请先创建</option>';
   if(prev&&store.projects.some(p=>p.id===prev))sel.value=prev;
   const p=getProj(sel.value);
   if(!p){document.getElementById('c139Score').innerHTML='<div class="sub">请先在项目管理中创建项目</div>';document.getElementById('c139Body').innerHTML='';return}
@@ -942,7 +1003,7 @@ const CHECK_ITEMS=[
 function renderTools(){
   const sel=document.getElementById('chkProj');
   const cur=sel.value;
-  sel.innerHTML='<option value="">— 选择项目 —</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  sel.innerHTML='<option value="">— 选择项目 —</option>'+projectsInView().map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   if(cur&&store.projects.some(p=>p.id===cur))sel.value=cur;
   else if(!sel.value&&currentProjectId&&store.projects.some(p=>p.id===currentProjectId))sel.value=currentProjectId;
   renderChecklist();
@@ -962,7 +1023,8 @@ function resetChecklist(){const pid=document.getElementById('chkProj').value;sto
 
 /* ================= 仪表盘 ================= */
 function renderDash(){
-  const ps=store.projects;
+  const dys=document.getElementById('dashYearSlot');if(dys)dys.innerHTML=yearSelectHtml('dashYearSel');
+  const ps=projectsInView();
   const active=ps.filter(p=>!LOST_STAGES.includes(p.stage)&&p.stage!=='已中标');
   const won=ps.filter(p=>p.stage==='已中标');
   const lost=ps.filter(p=>LOST_STAGES.includes(p.stage));
@@ -975,18 +1037,26 @@ function renderDash(){
   const steps=allOpenSteps(), risks=allOpenRisks();
   const overSteps=steps.filter(s=>dueState(s.due)==='over').length;
   const highRisk=risks.filter(r=>r.level==='高').length;
+  const yTxt=yearTag();
+  const kpi=(label,val,unit,go,tip)=>`<div class="kpi clickable" title="${tip||'点击查看对应项目清单'}" onclick='goProjects(${JSON.stringify(go)})'><div class="lb">${label}<i>→</i></div><div class="num">${val}<small style="font-size:12px;font-weight:400"> ${unit}</small></div><div class="lb">${yTxt}</div></div>`;
   document.getElementById('dashKpis').innerHTML=[
-    ['在跟项目',active.length,'个'],['预估总额',fmtWan(Math.round(estSum*10)/10),'万'],
-    ['加权金额',fmtWan(Math.round(wgtSum*10)/10),'万'],['已中标合同额',fmtWan(Math.round(wonSum*10)/10),'万'],
-    ['已中标毛利',fmtWan(Math.round(profitSum*10)/10),'万'],['中标率',winRate,'%'],['平均赢单率',avgRate,'%'],
-    ['逾期下一步',overSteps,'项'],['高风险未关闭',highRisk,'项']
-  ].map(k=>`<div class="kpi"><div class="lb">${k[0]}</div><div class="num">${k[1]}<small style="font-size:12px;font-weight:400"> ${k[2]}</small></div><div class="lb">&nbsp;</div></div>`).join('');
+    kpi('在跟项目',active.length,'个',{range:'active',sort:'rate'},'跳到「在跟」项目清单，按赢单率排序'),
+    kpi('预估总额',fmtWan(Math.round(estSum*10)/10),'万',{range:'active',sort:'est'},'跳到在跟项目，按预估合同额排序'),
+    kpi('加权金额',fmtWan(Math.round(wgtSum*10)/10),'万',{range:'active',sort:'wgt'},'预估额 × C139 赢单率，跳到按加权额排序'),
+    kpi('已中标合同额',fmtWan(Math.round(wonSum*10)/10),'万',{range:'won',sort:'won'},'跳到已中标项目'),
+    kpi('已中标毛利',fmtWan(Math.round(profitSum*10)/10),'万',{range:'won',sort:'profit'},'跳到已中标项目，按毛利排序'),
+    kpi('中标率',winRate,'%',{range:'closed'},'已中标 ÷（已中标+流标+输标+取消），跳到已收口项目'),
+    kpi('平均赢单率',avgRate,'%',{range:'active',sort:'rate'},'在跟项目 C139 均值'),
+    kpi('逾期下一步',overSteps,'项',{warn:'over'},'跳到有逾期待办的项目'),
+    kpi('高风险未关闭',highRisk,'项',{warn:'risk'},'跳到有高风险/问题未关闭的项目')
+  ].join('');
   const stages=['前期交流','方案阶段','招投标阶段','已中标','已流标','已输标','项目已取消'];
   const max=Math.max(1,...stages.map(s=>ps.filter(p=>p.stage===s).length));
   const funnelHtml=stages.map(s=>{
     const n=ps.filter(p=>p.stage===s).length;
-    return `<div class="funnel-row"><div class="fname">${s}</div><div class="fbar"><i style="width:${Math.round(n/max*100)}%">${n}</i></div></div>`}).join('');
-  const lvHtml=OPP_LEVELS.map(l=>`<span class="tag" style="margin:2px 8px 2px 0">${l} · ${active.filter(p=>p.oppLevel===l).length}</span>`).join('');
+    return `<div class="funnel-row clickable" title="点击查看「${s}」项目清单" onclick='goProjects(${JSON.stringify({stage:s,year:fyYear})})'>
+      <div class="fname">${s}<i>→</i></div><div class="fbar"><i style="width:${Math.round(n/max*100)}%">${n}</i></div></div>`}).join('');
+  const lvHtml=OPP_LEVELS.map(l=>`<span class="tag clickable" style="margin:2px 8px 2px 0" title="点击查看该级别项目" onclick='goProjects(${JSON.stringify({opp:l,range:"active",year:fyYear})})'>${l} · ${active.filter(p=>p.oppLevel===l).length} →</span>`).join('');
   document.getElementById('dashFunnel').innerHTML=funnelHtml+
     `<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px;font-size:12px;color:var(--sub)">在跟项目商机级别：${lvHtml||'—'}</div>`;
   document.getElementById('dashNext').innerHTML=steps.length?'<table>'+steps.slice(0,8).map(s=>{const st=dueState(s.due);
@@ -1112,10 +1182,10 @@ function riskSet(i,f,v){const p=getProj();const r=(p.risks||[])[i];if(!r)return;
 function riskDel(i){const p=getProj();p.risks.splice(i,1);persist();renderDetail()}
 
 /* 汇总给首页预警用 */
-function allOpenSteps(){const a=[];store.projects.forEach(p=>(p.nextSteps||[]).forEach(s=>{
+function allOpenSteps(){const a=[];projectsInView().forEach(p=>(p.nextSteps||[]).forEach(s=>{
   if(!s.done&&s.due&&s.due<=addDays(today(),SOON_DAYS))a.push(Object.assign({},s,{pid:p.id,pname:p.name}))}));
   return a.sort((x,y)=>x.due.localeCompare(y.due))}
-function allOpenRisks(){const a=[];store.projects.forEach(p=>(p.risks||[]).forEach(r=>{
+function allOpenRisks(){const a=[];projectsInView().forEach(p=>(p.risks||[]).forEach(r=>{
   if(r.status!=='已关闭')a.push(Object.assign({},r,{pid:p.id,pname:p.name}))}));
   return a.sort((x,y)=>RISK_LEVELS.indexOf(x.level)-RISK_LEVELS.indexOf(y.level))}
 
@@ -1136,15 +1206,15 @@ function projSelectHtml(id,onchange,opts={}){
   const cur=document.getElementById(id)?document.getElementById(id).value:(opts.value||currentProjectId||'');
   return `<select id="${id}" onchange="${onchange}" style="${opts.style||'width:260px'}">
     ${opts.empty?'<option value="">'+opts.empty+'</option>':''}
-    ${store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('')}
+    ${projectsInView().map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('')}
   </select>`;
 }
 function fillProjSelect(id,value=''){
   const el=document.getElementById(id);if(!el)return;
   const cur=el.value;   // 重建 option 会把用户刚选中的值清掉，先记住
-  const opts='<option value="">— 请选择项目 —</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('');
+  const opts='<option value="">— 请选择项目 —</option>'+projectsInView().map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('');
   if(el.innerHTML!==opts)el.innerHTML=opts;
-  const has=v=>!!v&&store.projects.some(p=>p.id===v);
+  const has=v=>!!v&&projectsInView().some(p=>p.id===v);
   const want=has(cur)?cur:(has(value)?value:(has(currentProjectId)?currentProjectId:''));
   if(want)el.value=want;
 }
@@ -1169,7 +1239,7 @@ function renderStakeholders(){
     <div><h3 style="margin:0">${esc(p.name)} · 干系人矩阵</h3>
     <div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 已识别 ${all.length} 人 · ${oppBadge(p.oppLevel)} ${stageBadge(p.stage)}</div></div>
     <div style="display:flex;gap:8px"><select id="stkProj2" onchange="document.getElementById('stkProj').value=this.value;renderStakeholders()" style="width:230px">
-      ${store.projects.map(x=>`<option value="${x.id}" ${x.id===pid?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
+      ${projectsInView().map(x=>`<option value="${x.id}" ${x.id===pid?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
       <button class="btn" onclick="openStakeholderModal(null,null,'${pid}')">＋ 新增关键人</button></div></div>`;
   /* 缺口与风险提示 */
   const tips=[];
@@ -1271,8 +1341,9 @@ function chainCoverage(pid){
 }
 function renderChain(){
   const el=document.getElementById('chainBody');if(!el)return;
-  const ps=store.projects.filter(p=>!LOST_STAGES.includes(p.stage));
-  if(!ps.length){el.innerHTML='<div class="card"><div class="empty">暂无在跟项目，请先在「项目管理」创建</div></div>';return}
+  const cys=document.getElementById('chainYearSlot');if(cys)cys.innerHTML=yearSelectHtml('chainYearSel');
+  const ps=projectsInView().filter(p=>!LOST_STAGES.includes(p.stage));
+  if(!ps.length){el.innerHTML=`<div class="card"><div class="empty">${fyYear==='all'?'暂无在跟项目':'当前年度（'+fyYear+'）没有在跟项目，可切换右上角年度'}</div></div>`;return}
   if(!chainPid||!ps.some(p=>p.id===chainPid))chainPid=(ps.some(p=>p.id===currentProjectId)?currentProjectId:ps[0].id);
   /* 1) 覆盖度总览 */
   const h1=`<div class="card"><h3>决策结构覆盖度（在跟 ${ps.length} 个项目 · 关键角色 ${KEY_ROLES.length} 个）</h3><div class="grid g4">`+
@@ -1604,12 +1675,13 @@ function renderCompintel(){
   const el=document.getElementById('ciBody');
   const sel=document.getElementById('ciProjFilter');
   const cur=sel.value;
-  const opts='<option value="">全部项目</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const opts='<option value="">全部项目</option>'+projectsInView().map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
   if(sel.innerHTML!==opts)sel.innerHTML=opts;
   if(cur&&store.projects.some(p=>p.id===cur))sel.value=cur;
   const kw=(document.getElementById('ciSearch').value||'').toLowerCase();
   const pf=sel.value;
   let list=store.compintel.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  if(fyYear!=='all')list=list.filter(x=>{const pr=x.projectId?getProj(x.projectId):null;return pr&&inYear(pr)});
   if(pf)list=list.filter(x=>x.projectId===pf);
   if(kw)list=list.filter(x=>(x.competitor+' '+x.product+' '+x.strategy+' '+x.source).toLowerCase().includes(kw));
   const p=pf?getProj(pf):null;

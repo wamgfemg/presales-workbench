@@ -28,6 +28,7 @@ const code =
   cut('/* ================= 路由', '/* ================= 项目管理') +
   cut('/* ================= 项目管理', '/* ================= 项目详情') +
   cut('/* ================= 项目详情', '/* ================= 向量知识库') +
+  cut('/* ================= 仪表盘', '/* ================= 二期：跟进记录') +
   cut('/* ================= 二期：跟进记录', '/* ================= 数据备份') +
   cut('/* ================= 干系人管理', '/* ================= 合同管理') +
   cut('/* ================= 合同管理', '/* ================= 报价管理') +
@@ -41,7 +42,8 @@ const boot = new Function('document', 'localStorage', 'window', 'fixedToday', co
   today=()=>fixedToday;
   seed();
   return {store, renderProjects, renderStakeholders, renderContracts, renderQuotations, renderCompintel, renderChain,
-    parseTerms, ensurePayments, projVal, chainCoverage, sumQtCost, sumQtQuote, projHasWarn,
+    parseTerms, ensurePayments, projVal, chainCoverage, sumQtCost, sumQtQuote, projHasWarn, projYearOf, projectsInView,
+    renderDash, pfSet, goProjects, setFyYear, inYear, getPF: () => PF, getSort: () => projSort,
     setSort:(k,d)=>{projSort.k=k;projSort.d=d}, _q:new Set()}
 `)
 const H = boot(document, localStorage, {}, TODAY)
@@ -52,6 +54,8 @@ console.log('--- 种子装载：' + store.projects.length + ' 个项目 / ' + Ob
 /* ---- 1. 项目管理：排序与筛选 ---- */
 T('阶段按业务顺序而非字母序', H.projVal({ stage: '招投标阶段' }, 'stage') > H.projVal({ stage: '方案阶段' }, 'stage'))
 T('金额取数正确（p1 预估 860）', H.projVal(store.projects.find(p => p.id === 'p1'), 'est') === 860)
+T('年度取实际签约月（p3 已签 2026-08 → 2026）', H.projYearOf(store.projects.find(p => p.id === 'p3')) === '2026', H.projYearOf(store.projects.find(p => p.id === 'p3')))
+T('年度取预计签约月（p4 2027-03 → 2027）', H.projYearOf(store.projects.find(p => p.id === 'p4')) === '2027')
 H.setSort('est', -1)
 els.projTable = undefined; document.getElementById('projTable').innerHTML = ''
 H.renderProjects()
@@ -59,28 +63,57 @@ const html0 = document.getElementById('projTable').innerHTML
 const rowsOf = html => (html.match(/<tr>/g) || []).length - 1   // 减去表头行
 T('渲染全部 6 个项目', rowsOf(html0) === 6, rowsOf(html0))
 T('降序表头显示 ▼', html0.includes('▼'))
-T('10 个可排序表头', (html0.match(/class="sortable/g) || []).length === 10, (html0.match(/class="sortable/g) || []).length)
+T('11 个可排序表头（新增年度与加权）', (html0.match(/class="sortable/g) || []).length === 11, (html0.match(/class="sortable/g) || []).length)
+T('列表含加权金额列', html0.includes('加权(万)'))
+T('命中统计行显示条件与合计', document.getElementById('projCount').innerHTML.includes('共') && document.getElementById('projCount').innerHTML.includes('预估合计'))
 const firstData = html0.slice(html0.indexOf('</tr>') + 5)
 T('预估额降序后首位是 860 万的项目', /860/.test(firstData.slice(0, 700)), firstData.slice(0, 60).replace(/\s+/g, ' '))
-document.getElementById('projWarnFilter').value = 'warn'
-document.getElementById('projTable').innerHTML = ''
-H.renderProjects()
-const warnN = rowsOf(document.getElementById('projTable').innerHTML)
-T('只看预警命中 2 个项目（p1 逾期下一步、p2 高风险未关闭）', warnN === 2, warnN)
-T('预警行带红色标记', document.getElementById('projTable').innerHTML.includes('>预警<'))
-document.getElementById('projWarnFilter').value = ''
-document.getElementById('projOppFilter').value = '博弈'
-document.getElementById('projTable').innerHTML = ''
-H.renderProjects()
+H.pfSet('warn', 'warn')
+T('pfSet 后预警筛选命中 2 个项目（p1 逾期 / p2 高风险）', rowsOf(document.getElementById('projTable').innerHTML) === 2, rowsOf(document.getElementById('projTable').innerHTML))
+H.pfSet('warn', 'over')
+T('只看逾期下一步命中 1 个（p1）', rowsOf(document.getElementById('projTable').innerHTML) === 1)
+H.pfSet('warn', 'risk')
+T('只看高风险命中 2 个（p1、p2 各有高风险未关闭）', rowsOf(document.getElementById('projTable').innerHTML) === 2, rowsOf(document.getElementById('projTable').innerHTML))
+H.pfSet('warn', '')
+H.pfSet('opp', '博弈')
 T('按商机级别=博弈 命中 2 个项目（p2 + p5）', rowsOf(document.getElementById('projTable').innerHTML) === 2)
-document.getElementById('projOppFilter').value = 'all'
-document.getElementById('projStageFilter').value = '已中标'
-document.getElementById('projTable').innerHTML = ''
-H.renderProjects()
+H.pfSet('opp', 'all')
+H.pfSet('stage', '已中标')
 T('按阶段=已中标 命中 1 个项目', rowsOf(document.getElementById('projTable').innerHTML) === 1)
-document.getElementById('projStageFilter').value = 'all'
+H.pfSet('stage', 'all')
+H.pfSet('range', 'active')
+T('范围=在跟 命中 3 个项目', rowsOf(document.getElementById('projTable').innerHTML) === 3, rowsOf(document.getElementById('projTable').innerHTML))
+H.pfSet('range', 'closed')
+T('范围=已收口 命中 3 个项目（中标1+输标1+取消1）', rowsOf(document.getElementById('projTable').innerHTML) === 3)
+H.pfSet('range', 'all')
 T('负责人下拉动态生成', (document.getElementById('projOwnerFilter').innerHTML.match(/<option>/g) || []).length >= 5,
   (document.getElementById('projOwnerFilter').innerHTML.match(/<option>/g) || []).length + ' 人')
+
+/* ---- 1b. 年度口径与首页下钻 ---- */
+H.setFyYear('2027')
+T('切到 2027 年只剩 1 个在跟项目', H.projectsInView().length === 1, H.projectsInView().length)
+H.renderProjects()
+T('项目列表跟随年度只剩 1 行', rowsOf(document.getElementById('projTable').innerHTML) === 1)
+H.setFyYear('2026')
+T('切到 2026 年有 5 个项目', H.projectsInView().length === 5, H.projectsInView().length)
+H.setFyYear('all')
+els.dashKpis = undefined; document.getElementById('dashKpis').innerHTML = ''
+document.getElementById('dashFunnel').innerHTML = ''
+H.renderDash()
+const kpiHtml = document.getElementById('dashKpis').innerHTML
+T('9 张指标卡全部可点击', (kpiHtml.match(/kpi clickable/g) || []).length === 9, (kpiHtml.match(/kpi clickable/g) || []).length)
+T('指标卡带 goProjects 跳转参数', kpiHtml.includes("goProjects({&quot;") || kpiHtml.includes('goProjects({"range":"active"'), kpiHtml.slice(kpiHtml.indexOf('onclick'), kpiHtml.indexOf('onclick') + 60))
+T('指标卡显示当前年度口径', kpiHtml.includes('全部年度'))
+const fn = document.getElementById('dashFunnel').innerHTML
+T('漏斗 7 个阶段均可点击', (fn.match(/funnel-row clickable/g) || []).length === 7, (fn.match(/funnel-row clickable/g) || []).length)
+T('商机级别标签可点击下钻', fn.includes('tag clickable'))
+H.goProjects({ range: 'won', sort: 'profit' })
+T('goProjects 写入范围条件', H.getPF().range === 'won')
+T('goProjects 写入排序键与方向', H.getSort().k === 'profit' && H.getSort().d === -1)
+H.renderProjects()
+T('按毛利排序后首位是中标项目', /某市政务云二期/.test(document.getElementById('projTable').innerHTML.slice(0, 1200)))
+H.goProjects({})
+T('重置筛选回到默认', H.getPF().range === 'all' && H.getPF().warn === '' && H.getSort().k === '')
 
 /* ---- 2. 报价 ---- */
 document.getElementById('qtBody').innerHTML = ''
