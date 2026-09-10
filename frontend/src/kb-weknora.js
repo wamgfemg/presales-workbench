@@ -1,5 +1,5 @@
 /* ================= 向量知识库 · WeKnora 真实对接（覆盖 main.js 中的同名函数） ================= */
-let WEK = { enabled: null, base: null, items: [], loading: false, error: '', loadedAt: 0 }
+let WEK = { enabled: null, base: null, items: [], loading: false, error: '', loadedAt: 0, kbs: [], kbId: '' }
 
 /* 目录归属映射：WeKnora 文档本身不带目录，目录是前端本地组织层。
    键=文档 id，值=目录节点 id（null/缺失 = 未归类，仅出现在「全部知识」）。
@@ -55,15 +55,29 @@ async function loadWeKnoraKb(force) {
   WEK.error = ''
   try {
     await loadCatMap() // 先拉取目录归属（后端优先，失败回退本地），保证跨设备一致
+    /* 先取可见知识库：配置里的 WEKNORA_KB_ID 可能属于别的租户（会 404），这里自动落到可见库 */
+    let kbs = []
+    try {
+      const kr = await fetch('/api/weknora/kbs')
+      const kj = await kr.json()
+      kbs = (kj.data || []).map(x => ({ id: x.id, name: x.name, docs: x.knowledge_count != null ? x.knowledge_count : (x.chunk_count ? '-' : ''), desc: x.description || '' }))
+    } catch (e) { kbs = [] }
+    WEK.kbs = kbs
+    const last = (function () { try { return localStorage.getItem('wek_kb') } catch (e) { return '' } })()
+    const cfg = WEK.kbId
+    const pick = [cfg, last].find(id => id && kbs.some(k => k.id === id)) || (kbs[0] && kbs[0].id) || ''
+    WEK.kbId = pick
+    const q = pick ? `?kb=${encodeURIComponent(pick)}` : ''
     const [baseRes, listRes] = await Promise.all([
-      fetch('/api/weknora/knowledge-base'),
-      fetch('/api/weknora/knowledge?page=1&page_size=100')
+      fetch('/api/weknora/knowledge-base' + q),
+      fetch('/api/weknora/knowledge?page=1&page_size=200' + (q ? (q.includes('?') ? '&' : '?') + 'kb=' + encodeURIComponent(pick) : ''))
     ])
     const baseData = await baseRes.json()
     const listData = await listRes.json()
-    WEK.base = baseData.data || null
+    WEK.base = baseData.data || (kbs.find(k => k.id === pick) || null)
     WEK.items = (listData.data || []).sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))
     WEK.enabled = true
+    WEK.notice = (!baseData.data && !baseData.success) ? '配置的默认知识库对当前 API Key 不可见，已自动切到可见知识库' : ''
   } catch (e) {
     WEK.error = String(e && e.message || e)
     WEK.enabled = false
@@ -71,6 +85,12 @@ async function loadWeKnoraKb(force) {
   WEK.loading = false
   WEK.loadedAt = Date.now()
   if (document.getElementById('p-kb') && document.getElementById('p-kb').classList.contains('on')) renderKb()
+}
+function kbPick(id) {
+  WEK.kbId = id
+  try { localStorage.setItem('wek_kb', id) } catch (e) {}
+  WEK.loadedAt = 0
+  loadWeKnoraKb(true)
 }
 
 function renderKb() {
@@ -84,9 +104,14 @@ function renderKb() {
   let statusHtml = ''
   if (WEK.loading) statusHtml = '正在连接 WeKnora…'
   else if (WEK.error) statusHtml = `WeKnora 连接失败：${esc(WEK.error)}`
-  else if (WEK.enabled) statusHtml = `已连接 WeKnora「${esc(WEK.base && WEK.base.name || '售前工具箱')}」· ${WEK.items.length} 个文档`
+  else if (WEK.enabled) statusHtml = `「${esc(WEK.base && WEK.base.name || '未命名知识库')}」· ${WEK.items.length} 个文档 · 只读（可查询与下载）`
   else statusHtml = '本地模拟向量库'
-  crumb.innerHTML = `当前目录：<b>${kbSelCat === 'all' ? '全部知识' : esc(catName(kbSelCat))}</b> · ${statusHtml} · 本目录 ${docsInCat(kbSelCat).length} 个文档`
+  const kbSel = WEK.kbs && WEK.kbs.length
+    ? `<select class="kb-cat-sel" title="切换知识库" onchange="kbPick(this.value)">` +
+      WEK.kbs.map(k => `<option value="${k.id}" ${k.id === WEK.kbId ? 'selected' : ''}>${esc(k.name)}</option>`).join('') + `</select> · `
+    : ''
+  crumb.innerHTML = `${kbSel}当前目录：<b>${kbSelCat === 'all' ? '全部知识' : esc(catName(kbSelCat))}</b> · ${statusHtml} · 本目录 ${docsInCat(kbSelCat).length} 个文档` +
+    (WEK.notice ? `<br><small style="color:#b25e0c">${esc(WEK.notice)}</small>` : '')
 
   if (WEK.loading && !WEK.items.length) { el.innerHTML = '<div class="empty">正在从 WeKnora 加载知识库文档…</div>'; return }
   if (WEK.error && !WEK.items.length) { el.innerHTML = `<div class="empty">WeKnora 加载失败<br><small>${esc(WEK.error)}</small><br><button class="btn sm" style="margin-top:10px" onclick="loadWeKnoraKb(true)">重试</button></div>`; return }
@@ -98,9 +123,9 @@ function renderKb() {
 
   if (!list.length) {
     if (WEK.enabled && kbSelCat !== 'all' && !kw.length) {
-      el.innerHTML = '<div class="empty">该目录下暂无文档<br><small>未归类的历史文档只在「全部知识」下显示；上传时选好目录即可归入此处</small></div>'
+      el.innerHTML = '<div class="empty">该目录下暂无文档<br><small>未归类的历史文档只在「全部知识」下显示；目录归类只影响本工作台的展示，不改动 WeKnora</small></div>'
     } else {
-      el.innerHTML = '<div class="empty">当前知识库暂无匹配文档<br>点击右上角「🚀 添加内容 · 向量化入库」上传文件到 WeKnora</div>'
+      el.innerHTML = '<div class="empty">当前知识库没有匹配文档<br><small>本页为只读：可检索、预览、下载原文；如需增删文档请到 WeKnora 管理端</small></div>'
     }
     return
   }
@@ -125,7 +150,7 @@ function renderKb() {
           ${store.kbTree.map(n => { let d = 0, p = n.pid; while (p) { d++; const q = store.kbTree.find(x => x.id === p); p = q ? q.pid : null } return `<option value="${n.id}" ${(WEK_CATM[it.id] || '') === n.id ? 'selected' : ''}>${'　'.repeat(d)}${esc(n.name)}</option>` }).join('')}
         </select>
         <button class="btn sm ghost" onclick="previewWekDoc('${it.id}')">预览</button>
-        <button class="btn sm danger" onclick="deleteWekDoc('${it.id}')">删除</button>
+        <a class="btn sm ghost" href="/api/weknora/download/${encodeURIComponent(it.id)}?kb=${encodeURIComponent(WEK.kbId || '')}&name=${encodeURIComponent(it.file_name || it.title || 'file')}" target="_blank">下载</a>
       </div>
       <div class="meta">更新于 ${fmtDate(it.updated_at || it.created_at)} · ${esc(it.file_name || '')}</div>
       <div class="body">${esc((it.description || '').slice(0, 600))}${(it.description || '').length > 600 ? '…' : ''}</div>

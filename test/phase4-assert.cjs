@@ -45,6 +45,7 @@ const boot = new Function('document', 'localStorage', 'window', 'fixedToday', co
   return {store, renderProjects, renderStakeholders, renderContracts, renderQuotations, renderCompintel, renderChain,
     parseTerms, ensurePayments, projVal, chainCoverage, sumQtCost, sumQtQuote, projHasWarn, projYearOf, projectsInView,
     goScore, goWeights, goSummary, goParseJson, goPrompt, renderDtGo, DEFAULTS: GO_WEIGHTS_DEFAULT,
+    trendData, trendSvgHtml, setTrendMode, qaCtx, qaBuildPrompt, renderQa,
     renderDash, pfSet, goProjects, setFyYear, inYear, getPF: () => PF, getSort: () => projSort,
     setSort:(k,d)=>{projSort.k=k;projSort.d=d}, _q:new Set()}
 `)
@@ -103,7 +104,7 @@ els.dashKpis = undefined; document.getElementById('dashKpis').innerHTML = ''
 document.getElementById('dashFunnel').innerHTML = ''
 H.renderDash()
 const kpiHtml = document.getElementById('dashKpis').innerHTML
-T('9 张指标卡全部可点击', (kpiHtml.match(/kpi clickable/g) || []).length === 9, (kpiHtml.match(/kpi clickable/g) || []).length)
+T('8 张指标卡全部可点击（加权金额已隐藏）', (kpiHtml.match(/kpi clickable/g) || []).length === 8, (kpiHtml.match(/kpi clickable/g) || []).length)
 T('指标卡带 goProjects 跳转参数', kpiHtml.includes("goProjects({&quot;") || kpiHtml.includes('goProjects({"range":"active"'), kpiHtml.slice(kpiHtml.indexOf('onclick'), kpiHtml.indexOf('onclick') + 60))
 T('指标卡显示当前年度口径', kpiHtml.includes('全部年度'))
 const fn = document.getElementById('dashFunnel').innerHTML
@@ -222,6 +223,39 @@ document.getElementById('dtBody').innerHTML = ''
 const dtGo = H.renderDtGo(store.projects.find(p => p.id === 'p1'))
 T('详情投入决策 Tab 渲染六维表', (dtGo.match(/<tr>/g) || []).length >= 7 && dtGo.includes('推进健康度'), (dtGo.match(/<tr>/g) || []).length)
 T('详情 Tab 含数据缺口与免责说明', dtGo.includes('数据缺口') && dtGo.includes('分数低有两种可能'))
+
+/* ---- 6. 趋势图 / 智能问答 / KPI 隐藏 ---- */
+document.getElementById('dashTrend').innerHTML = ''
+H.renderDash()
+const kpiHtml2 = document.getElementById('dashKpis').innerHTML
+T('首页已隐藏「加权金额」指标卡（剩 8 张）', !kpiHtml2.includes('加权金额') && (kpiHtml2.match(/kpi clickable/g) || []).length === 8, (kpiHtml2.match(/kpi clickable/g) || []).length)
+const td = H.trendData()
+T('按周分桶 12 个且标签为周一起始日', td.buckets.length === 12 && /^\d{2}-\d{2}$/.test(td.buckets[0].label), td.buckets[0].label)
+T('周桶跟进总数=种子跟进数 5', td.total === 5, td.total)
+T('最近一周有跟进（种子含 2 天前的记录）', td.buckets[11].n >= 1, td.buckets[11].n)
+H.setTrendMode('m')
+const tm = H.trendData()
+T('按月分桶 6 个月且总数不变', tm.buckets.length === 6 && tm.total === 5, tm.buckets.length + '/' + tm.total)
+const svg = H.trendSvgHtml(tm.buckets)
+T('SVG 含面积、折线与 6 个数据点', svg.includes('<svg') && svg.includes('<path') && (svg.match(/<circle/g) || []).length === 6, (svg.match(/<circle/g) || []).length)
+T('趋势说明带合计与零跟进提醒', document.getElementById('dashTrend').innerHTML.includes('次跟进'))
+H.setTrendMode('w')
+const ctx = H.qaCtx()
+T('问答上下文含项目名与 GO 判断', ctx.includes('省农信社核心系统灾备建设项目') && ctx.includes('GO 判断'))
+T('问答上下文含金额/决策链/跟进/风险/对手要点', ctx.includes('预估 860 万') && ctx.includes('关键角色覆盖') && ctx.includes('最近跟进') && ctx.includes('竞争对手'))
+T('上下文不出现 undefined', !ctx.includes('undefined'), ctx.split('\n').filter(l => l.includes('undefined')).join(' ⏎ ') || 'ok')
+document.getElementById('qaScope').value = 'p1'
+const single = H.qaCtx()
+T('切到单项目后上下文只含该项目', single.includes('省农信') && !single.includes('青海银行'))
+document.getElementById('qaScope').value = 'all'
+const bp = H.qaBuildPrompt('这个项目下一步做什么')
+T('提示词含角色/口径/数据/问题四段', bp.includes('【角色】') && bp.includes('【工作台数据】') && bp.includes('【用户问题】这个项目下一步做什么'))
+T('提示词要求不编造缺失数据', bp.includes('不要编造'))
+document.getElementById('qaMsgs').innerHTML = ''
+document.getElementById('qaQuick').innerHTML = ''
+H.renderQa()
+T('问答页渲染出 6 个快捷问题', (document.getElementById('qaQuick').innerHTML.match(/tag clickable/g) || []).length === 6, (document.getElementById('qaQuick').innerHTML.match(/tag clickable/g) || []).length)
+T('空态说明回答基于已录入数据', document.getElementById('qaMsgs').innerHTML.includes('已录入的数据'))
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败')
 process.exit(fail ? 1 : 0)

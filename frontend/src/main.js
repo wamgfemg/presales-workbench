@@ -113,6 +113,7 @@ function show(p){
   if(p==='dash')renderDash();
   if(p==='projects')renderProjects();
   if(p==='kb')renderKb();
+  if(p==='qa')renderQa();
   if(p==='pdocs')renderPdocs();
   if(p==='docs')renderDocsPage();
   if(p==='c139')renderC139();
@@ -1195,6 +1196,163 @@ function renderDtGo(p){
     <div class="hint" style="margin-top:12px">分数低有两种可能：真的不值得投，或者你还没把信息录进来。看上面的「数据缺口」区分这两件事。</div></div>`
 }
 
+/* ================= 跟进强度趋势（纯 SVG，不引第三方图表库） ================= */
+let trendMode='w';
+function setTrendMode(m){trendMode=m;renderDash()}
+function weekStartOf(dstr){const t=new Date(dstr+'T00:00:00');const dow=(t.getDay()+6)%7;t.setDate(t.getDate()-dow);return fmtDate(t)}
+function trendData(){
+  const sel=document.getElementById('trScope');const pid=(sel&&sel.value)||'all';
+  const src=store.followups||{};const items=[];
+  Object.keys(src).forEach(k=>{const p=getProj(k);if(!p)return;
+    if(pid!=='all'&&k!==pid)return;
+    if(fyYear!=='all'&&projYearOf(p)!==fyYear)return;
+    (src[k]||[]).forEach(f=>items.push(Object.assign({},f,{pid:k})))});
+  const now=new Date(today()+'T00:00:00');const buckets=[];
+  if(trendMode==='w'){
+    for(let i=11;i>=0;i--){const from=weekStartOf(addDays(today(),-i*7));buckets.push({label:from.slice(5),from,to:addDays(from,6)})}
+  }else{
+    for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);const e=new Date(now.getFullYear(),now.getMonth()-i+1,0);
+      buckets.push({label:(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')).slice(5),from:fmtDate(d),to:fmtDate(e)})}
+  }
+  buckets.forEach(b=>{
+    const inB=items.filter(f=>{const d=String(f.date||'').slice(0,10);return d>=b.from&&d<=b.to});
+    b.n=inB.length;
+    b.projects=new Set(inB.map(x=>x.pid)).size;
+    b.way={};
+    inB.forEach(x=>{const w=x.way||'其他';b.way[w]=(b.way[w]||0)+1});
+  });
+  return {buckets,total:items.length,pid,scopeName:pid==='all'?'全部项目':(getProj(pid)||{}).name||''}
+}
+function trendSvgHtml(buckets){
+  const W=720,H=190,P={l:34,r:14,t:14,b:26};
+  const max=Math.max(2,...buckets.map(b=>b.n));
+  const iw=W-P.l-P.r, ih=H-P.t-P.b;
+  const x=i=>P.l+(buckets.length<2?iw/2:iw*i/(buckets.length-1));
+  const y=v=>P.t+ih-(v/max)*ih;
+  const line=buckets.map((b,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(b.n).toFixed(1)}`).join(' ');
+  const area=`${line} L${x(buckets.length-1).toFixed(1)},${(P.t+ih).toFixed(1)} L${x(0).toFixed(1)},${(P.t+ih).toFixed(1)} Z`;
+  const grid=[0,.25,.5,.75,1].map(f=>{const v=Math.round(max*f),yy=y(v);
+    return `<line x1="${P.l}" y1="${yy}" x2="${W-P.r}" y2="${yy}" stroke="#eef1f8"/>
+      <text x="${P.l-7}" y="${yy+3.5}" text-anchor="end" font-size="9" fill="#9aa2b1">${v}</text>`}).join('');
+  const dots=buckets.map((b,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(b.n).toFixed(1)}" r="3.2" fill="${b.n?'var(--brand)':'#c3c9d6'}">
+      <title>${b.label}：${b.n} 次跟进${b.projects?`（覆盖 ${b.projects} 个项目）`:''}${Object.keys(b.way).length?'｜'+Object.entries(b.way).map(([k,v])=>k+v).join(' '):''}</title></circle>`).join('');
+  const labels=buckets.map((b,i)=>`<text x="${x(i).toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="9" fill="#9aa2b1">${b.label}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:190px;display:block">
+    ${grid}<path d="${area}" fill="rgba(76,110,245,.10)"/><path d="${line}" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linejoin="round"/>
+    ${dots}${labels}</svg>`
+}
+function renderTrend(){
+  const el=document.getElementById('dashTrend');if(!el)return;
+  const sel=document.getElementById('trScope');
+  if(sel){const cur=sel.value;const opts='<option value="all">全部项目</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    if(sel.innerHTML!==opts)sel.innerHTML=opts;if(cur&&store.projects.some(p=>p.id===cur))sel.value=cur}
+  const wm=document.getElementById('trModeW'),mm=document.getElementById('trModeM');
+  if(wm)wm.style.fontWeight=trendMode==='w'?'700':'400';if(mm)mm.style.fontWeight=trendMode==='m'?'700':'400';
+  const d=trendData();
+  if(!d.buckets.length){el.innerHTML='<div class="empty">暂无数据</div>';return}
+  const zero=d.buckets.filter(b=>!b.n).length;
+  const peak=d.buckets.reduce((a,b)=>b.n>a.n?b:a,d.buckets[0]);
+  el.innerHTML=trendSvgHtml(d.buckets)+
+    `<div class="hint" style="margin-top:6px">${esc(d.scopeName)} · ${trendMode==='w'?'近 12 周':'近 6 个月'}共 <b>${d.total}</b> 次跟进`+
+    (d.total?` · 峰值 ${peak.label}（${peak.n} 次）`:'')+
+    (zero?` · <span style="color:var(--bad)">${zero} 个${trendMode==='w'?'周':'月'}零跟进</span>`:'')+
+    ` · 口径跟随右上角年度（${yearTag()}）</div>`
+}
+
+/* ================= 智能问答（基于工作台数据的智能体问答） ================= */
+const QA_QUICK_ALL=['我手上哪些项目该放弃或暂缓？','哪些项目赢单率高但很久没跟进？','今年各阶段的商机数量和金额分布如何？','帮我总结本周所有项目的关键进展','决策链还没覆盖到最终审批人的项目有哪些？','风险最高、逾期事项最多的项目是哪个？']
+const QA_QUICK_PROJ=['这个项目下一步该做什么？','这个项目的赢单率为什么是这个数？','帮我梳理这个项目的决策链和突破口','针对竞争对手我该打什么点？','这个项目现在最大的风险是什么？']
+let QA={busy:false,msgs:[]}
+function qaScope(){const e=document.getElementById('qaScope');return (e&&e.value)||'all'}
+function qaFillScope(){const e=document.getElementById('qaScope');if(!e)return;
+  const cur=e.value;const opts='<option value="all">全局（所有项目）</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  if(e.innerHTML!==opts)e.innerHTML=opts;if(cur&&(cur==='all'||store.projects.some(p=>p.id===cur)))e.value=cur}
+function renderQa(){QA.msgs=qaLoad();qaRender()}
+function qaScopeChange(){QA.msgs=qaLoad();qaRender()}
+function qaClear(){const k='qa:'+qaScope();QA.msgs=[];try{localStorage.removeItem('pw_qa_'+k)}catch(e){}
+  fetch('/api/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:k})}).catch(()=>{});qaRender();toast('已清空本范围对话')}
+function qaLoad(){try{const a=JSON.parse(localStorage.getItem('pw_qa_qa:'+qaScope())||'[]');return Array.isArray(a)?a:[]}catch(e){return[]}}
+function qaSave(msgs){try{localStorage.setItem('pw_qa_qa:'+qaScope(),JSON.stringify(msgs.slice(-40)))}catch(e){}}
+function qaCtx(){
+  const scope=qaScope();const ps=scope==='all'?projectsInView():[getProj(scope)].filter(Boolean);
+  if(!ps.length)return '（当前范围内没有项目）';
+  return ps.map(p=>{const g=goScore(p),m=amountsOf(p),mg=marginOf(p),s=c139Stats(p.c139);
+    const fu=fuList(p.id).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,3);
+    const open=(p.nextSteps||[]).filter(x=>!x.done).slice(0,5);
+    const rk=(p.risks||[]).filter(r=>r.status!=='已关闭').slice(0,5);
+    const intel=store.compintel.filter(x=>x.projectId===p.id).slice(0,3);
+    return ['- '+p.name+'（甲方 '+p.customer+'｜阶段 '+p.stage+'｜商机级别 '+(p.oppLevel||'—')+'｜销售 '+(p.sales||'—')+'/售前 '+(p.presales||'—')+'）',
+      '  金额：预估 '+m.est+' 万、软件 '+m.sw+' 万、中标 '+(m.won||'未定')+' 万、成本 '+(m.cost||'未定')+' 万、毛利 '+(m.won?(mg.profit+' 万 / 毛利率 '+(mg.rate==null?'—':mg.rate+'%')):'未定')+
+        '；预计签约 '+(p.expectSignMonth||'未定')+(p.actualSignMonth?'、实际 '+p.actualSignMonth:''),
+      '  C139 赢单率 '+s.rate+'%（教练'+(p.c139&&p.c139.coach?'√':'×')+'、1Win'+(p.c139&&p.c139.is1W?'√':'×')+'、共识 '+(p.c139?(p.c139.consensus||[]).filter(Boolean).length:0)+'/3、要素 '+(p.c139?(p.c139.factors||[]).filter(Boolean).length:0)+'/9）；'+s.tip,
+      '  GO 判断：'+g.score+' 分（'+g.tierLabel+'）；关键角色覆盖 '+g.cov+'；数据缺口 '+(g.missing.join('、')||'无')+(g.flags.length?'；背离提示：'+g.flags.join('、'):''),
+      '  最近跟进：'+(fu.length?fu.map(f=>f.date+' '+f.way+'（'+(f.by||'—')+'）'+String(f.content).slice(0,60)).join(' / '):'无记录'),
+      '  未完成下一步：'+(open.length?open.map(x=>x.what+(x.due?'（截止 '+x.due+'）':'')).join('；'):'无'),
+      '  未关闭风险：'+(rk.length?rk.map(x=>'['+x.level+'] '+x.desc).join('；'):'无'),
+      '  竞争对手：'+(intel.length?intel.map(x=>x.competitor+(x.price?'（报价 '+x.price+' 万）':'')+((x.weaknesses||x.strengths)?'｜弱点:'+(String(x.weaknesses||'').slice(0,50)):'')).join('；'):'未录入'),
+      p.progressText?'  当前进展：'+p.progressText:''
+    ].join('\n')}).join('\n\n')
+}
+function qaBuildPrompt(q){
+  return ['【角色】你是售前团队的作战参谋，负责基于售前工作台里的真实数据回答问题并给出可执行建议。',
+    '【口径】只能依据下面的数据回答；数据里没有的信息要明确说"系统里还没有这项数据"，不要编造。',
+    '【范围】'+(qaScope()==='all'?'全部在跟/已收口项目（'+yearTag()+'）':(getProj(qaScope())||{}).name),
+    '【工作台数据】',qaCtx(),
+    '【回答要求】中文；先给结论，再给依据；涉及项目要点名项目；建议要落到"谁、做什么、什么时候"；控制在 400 字以内，必要时用短列表。',
+    '【用户问题】'+q].join('\n\n')
+}
+function qaMd(t){
+  return esc(t).replace(/```([\s\S]*?)```/g,(m,x)=>'<pre>'+x.trim()+'</pre>')
+    .replace(/^### (.*)$/gm,'<b>$1</b>').replace(/^## (.*)$/gm,'<b>$1</b>')
+    .replace(/^\s*[-*] (.*)$/gm,'· $1').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>')
+}
+function qaRender(){
+  const box=document.getElementById('qaMsgs');if(!box)return;
+  qaFillScope();
+  const q=document.getElementById('qaQuick');
+  if(q)q.innerHTML=(qaScope()==='all'?QA_QUICK_ALL:QA_QUICK_PROJ).map(x=>`<span class="tag clickable" onclick="qaAsk('${x.replace(/'/g,"\\'")}')">${esc(x)}</span>`).join('');
+  const msgs=QA.msgs;
+  box.innerHTML=msgs.length?msgs.map(m=>`<div class="qa-msg ${m.role}">${m.role==='me'?'<b>我：</b>':(m.role==='ai'?'<b>参谋：</b>':'')}<div>${m.role==='me'?esc(m.text):qaMd(m.text)}</div>${m.meta?`<small style="color:var(--sub)">${esc(m.meta)}</small>`:''}</div>`).join('')
+    :`<div class="empty">问我点关于项目的事。回答基于工作台里已录入的数据（项目主档、C139、GO 判断、决策链、跟进、风险、竞争情报），没录的信息我会告诉你缺。</div>`
+  box.scrollTop=box.scrollHeight;
+  const btn=document.getElementById('qaSendBtn');if(btn)btn.disabled=QA.busy;
+}
+function qaAsk(t){const e=document.getElementById('qaText');if(e){e.value=t;qaSend()}}
+async function qaSend(){
+  const ta=document.getElementById('qaText');const q=(ta&&ta.value||'').trim();
+  if(!q){toast('请先输入问题');return}
+  if(QA.busy){toast('参谋正在回答中…');return}
+  QA.busy=true;QA.msgs.push({role:'me',text:q});if(ta)ta.value='';
+  const idx=QA.msgs.push({role:'ai',text:'',streaming:true})-1;
+  const st=document.getElementById('qaStatus');qaRender();
+  const key='qa:'+qaScope();
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key,text:qaBuildPrompt(q)})});
+    if(!r.ok||!r.body){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status))}
+    const reader=r.body.getReader();const dec=new TextDecoder('utf-8');let buf='',finalText='',err=null
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      const parts=buf.split('\n\n');buf=parts.pop();
+      for(const part of parts){
+        const line=part.split('\n').find(l=>l.startsWith('data: '));if(!line)continue;
+        let ev;try{ev=JSON.parse(line.slice(6))}catch(_){continue}
+        if(st)st.textContent=ev.type==='status'?ev.text:(ev.type==='delta'?'正在生成…':st.textContent);
+        if(ev.type==='delta'&&ev.text){QA.msgs[idx].text+=ev.text;qaRenderLive(idx)}
+        else if(ev.type==='done'){finalText=ev.text||QA.msgs[idx].text;QA.msgs[idx].meta='模型 '+(ev.model||'')+(ev.usage&&ev.usage.input?' · token 输入 '+ev.usage.input+'/输出 '+ev.usage.output:'')}
+        else if(ev.type==='error'){err=ev.message||'回答失败'}
+      }
+    }
+    QA.msgs[idx].text=finalText||QA.msgs[idx].text||(err?('回答失败：'+err):'（没有收到内容）');
+  }catch(e){QA.msgs[idx].text='调用失败：'+((e&&e.message)||e)}
+  QA.msgs[idx].streaming=false;QA.busy=false;if(st)st.textContent='';
+  qaSave(QA.msgs);qaRender();
+}
+function qaRenderLive(i){const box=document.getElementById('qaMsgs');if(!box||!QA.msgs[i])return;
+  const m=QA.msgs[i];const last=box.lastElementChild;
+  if(last){last.innerHTML='<b>参谋：</b><div>'+qaMd(m.text)+(m.streaming?'<span class="qa-cursor">▍</span>':'')+'</div>'}
+  box.scrollTop=box.scrollHeight}
+
 /* ================= 仪表盘 ================= */
 function renderDash(){
   const dys=document.getElementById('dashYearSlot');if(dys)dys.innerHTML=yearSelectHtml('dashYearSel');
@@ -1216,7 +1374,6 @@ function renderDash(){
   document.getElementById('dashKpis').innerHTML=[
     kpi('在跟项目',active.length,'个',{range:'active',sort:'rate'},'跳到「在跟」项目清单，按赢单率排序'),
     kpi('预估总额',fmtWan(Math.round(estSum*10)/10),'万',{range:'active',sort:'est'},'跳到在跟项目，按预估合同额排序'),
-    kpi('加权金额',fmtWan(Math.round(wgtSum*10)/10),'万',{range:'active',sort:'wgt'},'预估额 × C139 赢单率，跳到按加权额排序'),
     kpi('已中标合同额',fmtWan(Math.round(wonSum*10)/10),'万',{range:'won',sort:'won'},'跳到已中标项目'),
     kpi('已中标毛利',fmtWan(Math.round(profitSum*10)/10),'万',{range:'won',sort:'profit'},'跳到已中标项目，按毛利排序'),
     kpi('中标率',winRate,'%',{range:'closed'},'已中标 ÷（已中标+流标+输标+取消），跳到已收口项目'),
@@ -1269,6 +1426,7 @@ function renderDash(){
     const bad=scored.filter(x=>x.g.flags.length).slice(0,4);
     noSlot.innerHTML+=bad.length?`<div class="hint" style="margin-top:10px"><b>判断背离提示</b>${bad.map(x=>`<div>· ${esc(x.p.name)}：${esc(x.g.flags[0])}</div>`).join('')}</div>`:'';
   }
+  renderTrend();
 }
 
 /* ================= 二期：跟进记录 / 下一步计划 / 风险与问题 ================= */

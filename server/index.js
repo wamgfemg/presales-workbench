@@ -323,8 +323,34 @@ const WEKNORA_API_KEY = process.env.WEKNORA_API_KEY || ''
 const WEKNORA_KB_ID = process.env.WEKNORA_KB_ID || ''
 const WEKNORA_ENABLED = !!(WEKNORA_API_KEY && WEKNORA_KB_ID)
 
-function proxyToWeKnora(req, res, targetPath, search) {
+/* WeKnora 可见知识库白名单：前端可切库查询，但只能用该 API Key 有权访问的库 */
+let _kbAllow = { at: 0, set: null }
+async function kbAllowed() {
+  if (_kbAllow.set && Date.now() - _kbAllow.at < 60000) return _kbAllow.set
+  const set = new Set()
+  try {
+    const r = await fetchWithTimeout(`${WEKNORA_URL}/api/v1/knowledge-bases`, { headers: { 'x-api-key': WEKNORA_API_KEY } }, WEKNORA_TIMEOUT_MS)
+    const j = await r.json()
+    for (const x of (j.data || [])) if (x && x.id) set.add(x.id)
+  } catch (e) {
+    log('拉取 WeKnora 知识库列表失败：', e && e.message)
+  }
+  if (WEKNORA_KB_ID) set.add(WEKNORA_KB_ID)
+  _kbAllow = { at: Date.now(), set }
+  return set
+}
+async function pickKb(sp) {
+  const want = sp ? String(sp.get('kb') || '') : ''
+  if (!want || want === WEKNORA_KB_ID) return WEKNORA_KB_ID
+  const allow = await kbAllowed()
+  if (allow.has(want)) return want
+  log(`忽略越权的 kb 参数 ${String(want).slice(0, 40)}，回退默认库`)
+  return WEKNORA_KB_ID
+}
+
+function proxyToWeKnora(req, res, targetPath, search, opts) {
   if (!WEKNORA_ENABLED) return sendJson(res, 503, { error: 'WeKnora 未配置' })
+  opts = opts || {}
   const base = new URL(WEKNORA_URL)
   const qs = search || ''
   const options = {
@@ -341,7 +367,8 @@ function proxyToWeKnora(req, res, targetPath, search) {
   delete options.headers['content-length'] // 让 Node 根据实际 body 重新计算
 
   const proxyReq = http.request(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode, proxyRes.headers)
+    const h = opts.disposition ? Object.assign({}, proxyRes.headers, { 'content-disposition': opts.disposition }) : proxyRes.headers
+    res.writeHead(proxyRes.statusCode, h)
     proxyRes.pipe(res)
   })
   proxyReq.on('timeout', () => {
@@ -656,27 +683,38 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 405, { error: 'method not allowed' })
     }
 
-    /* WeKnora 代理：前端通过 BFF 间接访问 WeKnora，避免暴露 API Key 与 8080 端口 */
-    if (url.startsWith('/api/weknora/knowledge-base') && req.method === 'GET') {
-      return proxyToWeKnora(req, res, `/knowledge-bases/${WEKNORA_KB_ID}`)
+    /* WeKnora 代理（只读）：前端通过 BFF 间接访问 WeKnora，不暴露 API Key 与 8080 端口。
+       按需求下线了上传与删除入口——向量库由 WeKnora 侧维护，工作台只做查询、预览、下载。 */
+    if (url.startsWith('/api/weknora/doc-category')) {
+      if (req.method === 'GET') return void (await handleCatMapGet(req, res))
+      if (req.method === 'PUT') return void (await handleCatMapPut(req, res))
+      return sendJson(res, 405, { error: 'method not allowed' })
     }
-    if (url.startsWith('/api/weknora/knowledge') && req.method === 'GET') {
-      const search = url.replace(/^\/api\/weknora\/knowledge/, '')
-      return proxyToWeKnora(req, res, `/knowledge-bases/${WEKNORA_KB_ID}/knowledge`, search)
+    if (req.method === 'GET' && url.startsWith('/api/weknora/')) {
+      const sp = new URL(url, 'http://localhost').searchParams
+      const kb = await pickKb(sp)
+      const p = url.split('?')[0]
+      if (p === '/api/weknora/kbs') return proxyToWeKnora(req, res, '/knowledge-bases', '')
+      if (p === '/api/weknora/knowledge-base') return proxyToWeKnora(req, res, `/knowledge-bases/${kb}`, '')
+      if (p.startsWith('/api/weknora/download/')) {
+        const id = decodeURIComponent(p.slice('/api/weknora/download/'.length))
+        if (!id) return sendJson(res, 400, { error: '缺少文档 ID' })
+        const name = String(sp.get('name') || id).slice(0, 120)
+        return proxyToWeKnora(req, res, `/knowledge/${id}/download`, '',
+          { disposition: `attachment; filename="${encodeURIComponent(name)}"` })
+      }
+      if (p === '/api/weknora/knowledge') {
+        const search = url.replace(/^\/api\/weknora\/knowledge/, '')
+        return proxyToWeKnora(req, res, `/knowledge-bases/${kb}/knowledge`, search)
+      }
+      if (p.startsWith('/api/weknora/knowledge/')) {
+        const id = decodeURIComponent(p.slice('/api/weknora/knowledge/'.length))
+        if (!id) return sendJson(res, 400, { error: '缺少文档 ID' })
+        return proxyToWeKnora(req, res, `/knowledge/${id}`, '')
+      }
     }
-    if (url.startsWith('/api/weknora/upload') && req.method === 'POST') {
-      return proxyToWeKnora(req, res, `/knowledge-bases/${WEKNORA_KB_ID}/knowledge/file`)
-    }
-    if (url.startsWith('/api/weknora/knowledge/') && req.method === 'DELETE') {
-      const itemId = decodeURIComponent(url.slice('/api/weknora/knowledge/'.length).split('?')[0])
-      if (!itemId) return sendJson(res, 400, { error: '缺少文档 ID' })
-      return proxyToWeKnora(req, res, `/knowledge/${itemId}`)
-    }
-    if (url.startsWith('/api/weknora/doc-category') && req.method === 'GET') {
-      return void (await handleCatMapGet(req, res))
-    }
-    if (url.startsWith('/api/weknora/doc-category') && req.method === 'PUT') {
-      return void (await handleCatMapPut(req, res))
+    if (url.startsWith('/api/weknora/') && (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE')) {
+      return sendJson(res, 403, { error: '工作台侧已向量化知识库已改为只读（查询与下载），如需上传或清理请到 WeKnora 操作' })
     }
 
     if (url.startsWith('/api/reset') && req.method === 'POST') {

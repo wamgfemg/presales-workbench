@@ -14,18 +14,19 @@
     <nav class="nav" id="nav">
       <button data-p="dash" class="on"><span class="ico">📊</span>工作台首页</button>
       <button data-p="projects"><span class="ico">📁</span>项目管理</button>
-      <!-- 向量知识库入口已按需求隐藏（保留 DOM 便于恢复） -->
-      <button data-p="kb" style="display:none" title="向量知识库（已隐藏）"><span class="ico">📚</span>向量知识库</button>
+      <button data-p="qa"><span class="ico">🤖</span>智能问答</button>
+      <button data-p="kb"><span class="ico">📚</span>向量知识库</button>
       <button data-p="pdocs"><span class="ico">🗂️</span>项目知识库</button>
       <button data-p="docs"><span class="ico">📝</span>方案制作中心</button>
       <button data-p="c139"><span class="ico">🎯</span>C139 赢单评估</button>
       <button data-p="tools"><span class="ico">🧰</span>投标工具箱</button>
-      <button data-p="stakeholders"><span class="ico">🧑‍🤝‍🧑</span>干系人管理</button>
+      <button data-p="stakeholders"><span class="ico">🧑‍‍🧑</span>干系人管理</button>
       <button data-p="chain"><span class="ico">🧭</span>决策链</button>
       <button data-p="contracts"><span class="ico">📋</span>合同管理</button>
       <button data-p="quotations"><span class="ico">💰</span>报价管理</button>
       <button data-p="compintel"><span class="ico">🕵️</span>竞争情报</button>
-      <button data-p="requirements"><span class="ico">📋</span>需求管理</button>
+      <!-- 需求管理入口已按需求隐藏（保留 DOM 与逻辑，去掉下一行的 style 即可恢复） -->
+      <button data-p="requirements" style="display:none"><span class="ico">📋</span>需求管理</button>
     </nav>
     <div class="side-foot">
       数据存服务器 <span id="syncState" title="业务数据已落库 SQLite；本机浏览器另留一份缓存">●</span>
@@ -48,6 +49,14 @@
       <div class="grid g2">
         <div class="card"><h3>商机投入决策 · 建议重点投入（GO）</h3><div id="dashGo"></div></div>
         <div class="card"><h3>商机投入决策 · 建议暂缓 / 放弃（NO-GO）</h3><div id="dashNoGo"></div></div>
+      </div>
+      <div class="card"><h3>跟进强度趋势
+        <span style="float:right;display:flex;gap:8px;align-items:center;font-weight:400">
+          <select id="trScope" onchange="renderDash()" style="width:190px"><option value="all">全部项目</option></select>
+          <button class="btn sm ghost" id="trModeW" onclick="setTrendMode('w')">按周</button>
+          <button class="btn sm ghost" id="trModeM" onclick="setTrendMode('m')">按月</button>
+        </span></h3>
+        <div id="dashTrend"></div>
       </div>
       <div class="grid g2">
         <div class="card"><h3>项目阶段漏斗</h3><div id="dashFunnel"></div></div>
@@ -127,12 +136,30 @@
       <div id="dtBody"></div>
     </section>
 
+    <!-- ============ 智能问答 ============ -->
+    <section class="page" id="p-qa">
+      <div class="page-head"><div><h2>智能问答</h2><div class="desc">基于工作台已有数据回答项目分析问题（商机、决策链、跟进、风险、GO 判断）</div></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="qaScope" onchange="qaScopeChange()" style="width:250px"></select>
+          <button class="btn ghost" onclick="qaClear()">清空对话</button></div></div>
+      <div class="card">
+        <div id="qaMsgs" class="qa-msgs"></div>
+        <div class="qa-quick" id="qaQuick"></div>
+        <div class="qa-input">
+          <textarea id="qaText" rows="2" placeholder="问点什么，例如：我手上哪些项目该放弃？／省农信项目下一步该做什么？／今年赢单率下滑是什么原因？"
+            onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){qaSend()}"></textarea>
+          <button class="btn" id="qaSendBtn" onclick="qaSend()">发送<span class="kbd">Ctrl+Enter</span></button>
+        </div>
+        <div class="hint" id="qaStatus"></div>
+      </div>
+    </section>
+
     <!-- ============ 向量知识库 ============ -->
     <section class="page" id="p-kb">
-      <div class="page-head"><div><h2>向量知识库</h2><div class="desc">目录树管理 · 四步向量化入库（上传→创建设置→分段预览→数据处理）· 召回调试；已对接 WeKnora 真实向量库（售前工具箱）</div></div>
+      <div class="page-head"><div><h2>向量知识库</h2><div class="desc">只读浏览 WeKnora：检索、预览、下载原文；目录归类只影响本工作台展示。上传与清理请到 WeKnora 管理端</div></div>
         <div style="display:flex;gap:8px">
           <button class="btn ghost" onclick="openDebug()">🔍 召回调试</button>
-          <button class="btn" onclick="openWizard()">🚀 添加内容 · 向量化入库</button></div></div>
+          <button class="btn ghost" onclick="loadWeKnoraKb(true)">↻ 刷新</button></div></div>
       <div class="doc-layout" style="grid-template-columns:250px 1fr">
         <div class="card"><h3>知识库目录</h3>
           <button class="btn sm ghost" style="width:100%;margin-bottom:10px" onclick="addCatNode(null)">＋ 新建根目录</button>
