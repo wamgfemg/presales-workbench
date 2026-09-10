@@ -28,6 +28,7 @@ const code =
   cut('/* ================= 路由', '/* ================= 项目管理') +
   cut('/* ================= 项目管理', '/* ================= 项目详情') +
   cut('/* ================= 项目详情', '/* ================= 向量知识库') +
+  cut('/* ================= 商机投入决策', '/* ================= 仪表盘') +
   cut('/* ================= 仪表盘', '/* ================= 二期：跟进记录') +
   cut('/* ================= 二期：跟进记录', '/* ================= 数据备份') +
   cut('/* ================= 干系人管理', '/* ================= 合同管理') +
@@ -43,6 +44,7 @@ const boot = new Function('document', 'localStorage', 'window', 'fixedToday', co
   seed();
   return {store, renderProjects, renderStakeholders, renderContracts, renderQuotations, renderCompintel, renderChain,
     parseTerms, ensurePayments, projVal, chainCoverage, sumQtCost, sumQtQuote, projHasWarn, projYearOf, projectsInView,
+    goScore, goWeights, goSummary, goParseJson, goPrompt, renderDtGo, DEFAULTS: GO_WEIGHTS_DEFAULT,
     renderDash, pfSet, goProjects, setFyYear, inYear, getPF: () => PF, getSort: () => projSort,
     setSort:(k,d)=>{projSort.k=k;projSort.d=d}, _q:new Set()}
 `)
@@ -63,7 +65,7 @@ const html0 = document.getElementById('projTable').innerHTML
 const rowsOf = html => (html.match(/<tr>/g) || []).length - 1   // 减去表头行
 T('渲染全部 6 个项目', rowsOf(html0) === 6, rowsOf(html0))
 T('降序表头显示 ▼', html0.includes('▼'))
-T('11 个可排序表头（新增年度与加权）', (html0.match(/class="sortable/g) || []).length === 11, (html0.match(/class="sortable/g) || []).length)
+T('12 个可排序表头（含年度/加权/投入建议）', (html0.match(/class="sortable/g) || []).length === 12, (html0.match(/class="sortable/g) || []).length)
 T('列表含加权金额列', html0.includes('加权(万)'))
 T('命中统计行显示条件与合计', document.getElementById('projCount').innerHTML.includes('共') && document.getElementById('projCount').innerHTML.includes('预估合计'))
 const firstData = html0.slice(html0.indexOf('</tr>') + 5)
@@ -171,6 +173,55 @@ document.getElementById('ciProjFilter').value = ''
 document.getElementById('ciBody').innerHTML = ''
 H.renderCompintel()
 T('全部项目视图显示对手画像', document.getElementById('ciBody').innerHTML.includes('对手画像'))
+
+/* ---- 5. 商机投入决策 GO / NO-GO ---- */
+const g1 = H.goScore(store.projects.find(p => p.id === 'p1'))
+const g4 = H.goScore(store.projects.find(p => p.id === 'p4'))
+const g2 = H.goScore(store.projects.find(p => p.id === 'p2'))
+T('默认权重为 30/20/12/15/15/8', JSON.stringify(H.goWeights()) === JSON.stringify(H.DEFAULTS), JSON.stringify(H.goWeights()))
+T('六维得分齐全', ['win', 'rel', 'comm', 'comp', 'value', 'health'].every(k => typeof g1.dims[k] === 'number'), JSON.stringify(g1.dims))
+T('p1（控单+全角色+教练+对手情报）GO 分高于 p4', g1.score > g4.score, g1.score + ' vs ' + g4.score)
+T('p1 判为「重点投入」', g1.tier === 'must', g1.score + ' ' + g1.tierLabel)
+T('p4 因缺信息归入「数据不足」而不是放弃', g4.tier === 'data' && g4.missing.length >= 3, g4.missing.join('/'))
+T('p2 触发「自称控单」以外的背离或高风险提示', g2.flags.length > 0 || g2.missing.length > 0, g2.flags.join('/') + ' | ' + g2.missing.join('/'))
+store.ui = { weights: { win: 100, rel: 0, comm: 0, comp: 0, value: 0, health: 0 } }
+const g1w = H.goScore(store.projects.find(p => p.id === 'p1'))
+T('权重覆盖生效（其余置 0 → 总分等于赢面分）', g1w.score === g1w.dims.win, g1w.score + ' vs win=' + g1w.dims.win)
+T('显式置 0 是合法覆盖（该维度不再计入）', H.goWeights().rel === 0 && g1w.score === g1w.dims.win, JSON.stringify(H.goWeights()))
+store.ui = { weights: { win: 55 } }
+T('未提供的维度回退默认权重', H.goWeights().rel === H.DEFAULTS.rel && H.goWeights().win === 55, JSON.stringify(H.goWeights()))
+store.ui = {}
+const fake = Object.assign({}, store.projects.find(p => p.id === 'p1'))
+fake.oppLevel = '控单'; fake.c139 = { is1W: false, coach: false, consensus: [false, false, false], factors: [true, true, false, false, false, false, false, false, false], note: '' }
+T('背离检测：自称控单但 C139 低分被点名', H.goScore(fake).flags.some(f => f.includes('自称控单')), H.goScore(fake).flags.join('/'))
+const parsed = H.goParseJson('结论如下： {"score": 62, "verdict": "谨慎GO", "reasons": ["a","b"], "gaps": ["c"], "action": "先补预算"} 以上')
+T('AI 返回带杂文本仍能解析出 JSON', !!parsed && parsed.score === 62 && parsed.verdict === '谨慎GO', JSON.stringify(parsed))
+T('AI 返回非 JSON 时安全返回 null', H.goParseJson('我需要更多信息才能判断') === null)
+const prompt = H.goPrompt(fake, H.goScore(fake))
+T('提示词含六维与权重', prompt.includes('六维指标') && prompt.includes('"win":30'))
+T('提示词含成本毛利（已获授权外发）', prompt.includes('成本') && prompt.includes('毛利率'))
+T('提示词要求只输出一行 JSON', prompt.includes('只输出一行 JSON'))
+T('提示词要求缺信息不直接判 NO-GO', prompt.includes('不要直接判 NO-GO'))
+const sum = H.goSummary(H.projectsInView().filter(p => p.stage !== '已中标' && !['已流标', '已输标', '项目已取消'].includes(p.stage)))
+T('小盘汇总四档计数之和=在跟项目数', sum.must + sum.watch + sum.drop + sum.data === 3, JSON.stringify(sum))
+document.getElementById('dashGoSummary').innerHTML = ''
+document.getElementById('dashGo').innerHTML = ''
+document.getElementById('dashNoGo').innerHTML = ''
+H.renderDash()
+const goHtml = document.getElementById('dashGo').innerHTML
+T('GO 榜渲染出项目行与 AI 复核按钮', goHtml.includes('AI 复核') && goHtml.includes('dimbar'), goHtml.length)
+T('小盘汇总渲染出四档与权重按钮', document.getElementById('dashGoSummary').innerHTML.includes('重点投入') && document.getElementById('dashGoSummary').innerHTML.includes('权重设置'))
+T('NO-GO 榜渲染', document.getElementById('dashNoGo').innerHTML.length > 100)
+H.goProjects({ go: 'data' })
+T('goProjects 带上投入建议条件', H.getPF().go === 'data')
+H.renderProjects()
+T('按「数据不足」筛出 3 个项目（清单含已收口项目，口径比小盘宽）', rowsOf(document.getElementById('projTable').innerHTML) === 3, rowsOf(document.getElementById('projTable').innerHTML))
+T('清单出现投入建议列', document.getElementById('projTable').innerHTML.includes('投入建议'))
+H.goProjects({})
+document.getElementById('dtBody').innerHTML = ''
+const dtGo = H.renderDtGo(store.projects.find(p => p.id === 'p1'))
+T('详情投入决策 Tab 渲染六维表', (dtGo.match(/<tr>/g) || []).length >= 7 && dtGo.includes('推进健康度'), (dtGo.match(/<tr>/g) || []).length)
+T('详情 Tab 含数据缺口与免责说明', dtGo.includes('数据缺口') && dtGo.includes('分数低有两种可能'))
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败')
 process.exit(fail ? 1 : 0)

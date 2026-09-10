@@ -2,7 +2,7 @@
 /* ================= 数据层 ================= */
 const LS_KEY='presales_workbench_v5';
 let store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
-  stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{}};
+  stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{},ui:{}};
 let editingProjectId=null, currentProjectId=null, kbEditingId=null;
 
 const DEF_CATS=['产品资料','案例库','技术方案素材','公司资质与实力','竞品情报','话术与FAQ','模板与规范'];
@@ -48,7 +48,7 @@ function yearTag(){return fyYear==='all'?'全部年度':fyYear+' 年'}
 function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify(store))}catch(e){}try{schedulePush()}catch(e){}}
 function load(){try{const s=localStorage.getItem(LS_KEY);if(s)store=JSON.parse(s)}catch(e){}
   if(!store.projects)store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
-    stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{}};
+    stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{},ui:{}};
   if(!store.tasks)store.tasks=[];if(!store.docs)store.docs=[];if(!store.checklists)store.checklists={};
   if(!store.pdocs)store.pdocs={};
   if(!store.stakeholders)store.stakeholders={};
@@ -57,6 +57,7 @@ function load(){try{const s=localStorage.getItem(LS_KEY);if(s)store=JSON.parse(s
   if(!store.compintel)store.compintel=[];
   if(!store.requirements)store.requirements={};
   if(!store.followups)store.followups={};
+  if(!store.ui)store.ui={};
   if(!store.kbTree||!store.kbTree.length){
     store.kbTree=DEF_CATS.map(n=>({id:uid(),name:n,pid:null}));
     store.kb.forEach(k=>{if(k.category!==undefined){const n=store.kbTree.find(t=>t.name===k.category);k.catId=n?n.id:null;delete k.category}});
@@ -169,7 +170,7 @@ function addTl(p,text){p.timeline=p.timeline||[];p.timeline.unshift({d:today(),t
 function delProject(id){if(!confirm('确定删除该项目？'))return;store.projects=store.projects.filter(p=>p.id!==id);persist();renderProjects();toast('已删除')}
 
 let projSort={k:'',d:1};
-const PF={year:'all',range:'all',stage:'all',opp:'all',owner:'',warn:'',kw:''};
+const PF={year:'all',range:'all',stage:'all',opp:'all',owner:'',warn:'',go:'',kw:''};
 const RANGES={all:'全部',active:'在跟',won:'已中标',lost:'已流失',closed:'已收口'};
 function inRange(p,r){
   const won=p.stage==='已中标', lost=LOST_STAGES.includes(p.stage);
@@ -190,6 +191,7 @@ function projVal(p,k){switch(k){
   case 'profit':return marginOf(p).profit;case 'margin':return marginOf(p).rate==null?-1:marginOf(p).rate;
   case 'wgt':return amountsOf(p).est*c139Stats(p.c139).rate/100;
   case 'rate':return c139Stats(p.c139).rate;case 'expect':return p.expectSignMonth||p.keyDate||'';
+  case 'go':return goScore(p).score;
   case 'year':return projYearOf(p);
   case 'sales':return p.sales||'';case 'presales':return p.presales||'';default:return 0}}
 function sortProjects(k){if(projSort.k===k)projSort.d=-projSort.d;else{projSort.k=k;projSort.d=1}renderProjects()}
@@ -200,7 +202,7 @@ function pfSet(k,v){PF[k]=v;renderProjects()}
 function goProjects(o){
   o=o||{};
   if(o.year)PF.year=o.year;
-  PF.range=o.range||'all';PF.stage=o.stage||'all';PF.opp=o.opp||'all';PF.warn=o.warn||'';PF.owner='';
+  PF.range=o.range||'all';PF.stage=o.stage||'all';PF.opp=o.opp||'all';PF.warn=o.warn||'';PF.go=o.go||'';PF.owner='';
   if(o.sort){projSort.k=o.sort;projSort.d=o.desc===false?1:-1}else{projSort.k='';projSort.d=-1}
   show('projects')
 }
@@ -211,7 +213,7 @@ function renderProjects(){
   ySel.innerHTML='<option value="all">全部年度</option>'+ys.map(y=>`<option value="${y}">${y} 年</option>`).join('');
   ySel.value=PF.year==='all'||ys.includes(PF.year)?PF.year:'all';PF.year=ySel.value;
   const setVal=(id,v)=>{const e=document.getElementById(id);if(e)e.value=v};
-  setVal('projRangeFilter',PF.range);setVal('projStageFilter',PF.stage);setVal('projOppFilter',PF.opp);setVal('projWarnFilter',PF.warn);
+  setVal('projRangeFilter',PF.range);setVal('projStageFilter',PF.stage);setVal('projOppFilter',PF.opp);setVal('projWarnFilter',PF.warn);setVal('projGoFilter',PF.go);
   const owSel=document.getElementById('projOwnerFilter');
   const names=[...new Set(projectsInView().flatMap(p=>[p.sales,p.presales].filter(Boolean)))].sort((a,b)=>String(a).localeCompare(String(b),'zh'));
   owSel.innerHTML='<option value="">全部负责人</option>'+names.map(n=>`<option>${esc(n)}</option>`).join('');
@@ -223,6 +225,7 @@ function renderProjects(){
     &&(PF.opp==='all'||p.oppLevel===PF.opp)
     &&(!PF.owner||p.sales===PF.owner||p.presales===PF.owner)
     &&(!PF.warn||(PF.warn==='warn'?projHasWarn(p):projWarnFlags(p)[PF.warn]))
+    &&(!PF.go||goScore(p).tier===PF.go)
     &&(!kw||(p.name+p.customer+(p.sales||'')+(p.presales||'')).toLowerCase().includes(kw)));
   const sorted=projSort.k?list.slice().sort((a,b)=>{
     const x=projVal(a,projSort.k),y=projVal(b,projSort.k);
@@ -231,18 +234,20 @@ function renderProjects(){
   const cond=[];if(PF.year!=='all')cond.push(PF.year+' 年');if(PF.range!=='all')cond.push(RANGES[PF.range]);
   if(PF.stage!=='all')cond.push(PF.stage);if(PF.opp!=='all')cond.push(PF.opp);
   if(PF.owner)cond.push(PF.owner);if(PF.warn)cond.push(PF.warn==='warn'?'有预警':PF.warn==='over'?'逾期下一步':'高风险');
+  if(PF.go)cond.push('投入:'+goLevelLabel(PF.go));
   const cnt=document.getElementById('projCount');
   if(cnt)cnt.innerHTML=`共 <b>${sorted.length}</b> 个项目${cond.length?' · 条件：'+cond.join(' / '):''} · 预估合计 <b>${fmtWan(Math.round(sorted.reduce((s,p)=>s+amountsOf(p).est,0)*10)/10)}</b> 万`;
   const t=document.getElementById('projTable');
-  if(!sorted.length){t.innerHTML='<tr><td colspan="12"><div class="empty">没有符合条件的项目</div></td></tr>';return}
-  t.innerHTML=`<tr>${pth('name','项目')}${pth('customer','甲方')}${pth('year','年度')}${pth('stage','阶段')}${pth('oppLevel','商机级别')}
+  if(!sorted.length){t.innerHTML='<tr><td colspan="13"><div class="empty">没有符合条件的项目</div></td></tr>';return}
+  t.innerHTML=`<tr>${pth('name','项目')}${pth('customer','甲方')}${pth('year','年度')}${pth('stage','阶段')}${pth('oppLevel','商机级别')}${pth('go','投入建议')}
     ${pth('est','预估(万)')}${pth('wgt','加权(万)')}${pth('rate','C139赢单率')}${pth('expect','预计签约')}${pth('sales','销售')}${pth('presales','售前')}
     <th style="width:170px">操作</th></tr>`+
-  sorted.map(p=>{const s=c139Stats(p.c139);const m=amountsOf(p);const w=projWarnFlags(p);return `<tr>
+  sorted.map(p=>{const s=c139Stats(p.c139);const m=amountsOf(p);const w=projWarnFlags(p);const g=goScore(p);return `<tr>
     <td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${p.id}')">${esc(p.name)}</b>
       ${w.over?' <span class="tag" style="background:#fde8ef;color:var(--bad)" title="有逾期下一步">逾期</span>':''}
       ${w.risk?' <span class="tag" style="background:#fde8ef;color:var(--bad)" title="有高风险未关闭">高风险</span>':''}</td>
     <td>${esc(p.customer)}</td><td>${esc(projYearOf(p)||'—')}</td><td>${stageBadge(p.stage)}</td><td>${oppBadge(p.oppLevel)}</td>
+    <td title="六维：${GO_DIMS.map(([k,lab])=>lab+' '+g.dims[k]).join('｜')}"><b style="color:${goLevelColor(g.tier)}">${g.score}</b> <small style="color:${goLevelColor(g.tier)}">${g.tierLabel}</small></td>
     <td>${m.est?fmtWan(m.est):'—'}</td><td style="color:var(--sub)">${m.est?fmtWan(Math.round(m.est*s.rate)/100):'—'}</td>
     <td><div class="wr"><span class="pct" style="color:${s.rate>=85?'var(--ok)':s.rate>=50?'#b25e0c':'var(--bad)'}">${s.rate}%</span>${zoneBadge(s.zone)}</div></td>
     <td>${esc(p.expectSignMonth||p.keyDate||'—')}</td><td>${esc(p.sales||'—')}</td><td>${esc(p.presales||'—')}</td>
@@ -274,8 +279,8 @@ function renderDetail(){
     return `<div class="step ${cls}"><div class="dot">${i<ci?'✓':i+1}</div>${st}</div>`}).join('')+
     (lost?`<div class="step cur"><div class="dot" style="background:var(--bad);color:#fff">✕</div>${p.stage}</div>`:'');
   document.querySelectorAll('#dtTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===dtTab));
-  document.getElementById('dtBody').innerHTML=({renderDtInfo,renderDtFollow,renderDtPlan,renderDtRisk,renderDtTask,renderDtTl,renderDtC139,renderDtDoc,renderDtStk,renderDtContract})[
-    {info:'renderDtInfo',fu:'renderDtFollow',plan:'renderDtPlan',risk:'renderDtRisk',task:'renderDtTask',tl:'renderDtTl',c:'renderDtC139',doc:'renderDtDoc',stk:'renderDtStk',contract:'renderDtContract'}[dtTab]](p);
+  document.getElementById('dtBody').innerHTML=({renderDtInfo,renderDtFollow,renderDtPlan,renderDtRisk,renderDtTask,renderDtTl,renderDtGo,renderDtC139,renderDtDoc,renderDtStk,renderDtContract})[
+    {info:'renderDtInfo',fu:'renderDtFollow',plan:'renderDtPlan',risk:'renderDtRisk',task:'renderDtTask',tl:'renderDtTl',go:'renderDtGo',c:'renderDtC139',doc:'renderDtDoc',stk:'renderDtStk',contract:'renderDtContract'}[dtTab]](p);
 }
 document.getElementById('dtTabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b){dtTab=b.dataset.t;renderDetail()}});
 
@@ -1021,6 +1026,175 @@ function renderChecklist(){
 }
 function resetChecklist(){const pid=document.getElementById('chkProj').value;store.checklists['chk_'+pid]=Array(CHECK_ITEMS.length).fill(false);persist();renderChecklist();toast('已重置')}
 
+/* ================= 商机投入决策 GO / NO-GO =================
+ * C139 回答「能不能赢」，这里回答「值不值得继续压售前资源」——
+ * 赢单率 90% 但只卖硬件代理的项目，C139 高分、GO 分应该低。
+ * 六维全部由系统已有数据算；算不出来的进 missing。缺信息不等于该放弃：缺 3 项以上归「数据不足」档。
+ */
+const GO_DIMS=[['win','赢面 C139'],['rel','关系密度'],['comm','沟通热度'],['comp','竞争位势'],['value','商业价值'],['health','推进健康度']];
+const GO_WEIGHTS_DEFAULT={win:30,rel:20,comm:12,comp:15,value:15,health:8};
+const GO_TIERS=[{k:'must',min:70,label:'重点投入'},{k:'watch',min:50,label:'观察加力'},{k:'drop',min:0,label:'暂缓/放弃'}];
+function clamp(v,a,b){return Math.max(a,Math.min(b,Math.round(v)))}
+function daysSince(d){if(!d)return 999;const t=new Date(String(d).slice(0,10)+'T00:00:00');if(isNaN(t.getTime()))return 999;
+  return Math.floor((new Date(today()+'T00:00:00').getTime()-t.getTime())/86400000)}
+function goWeights(){
+  const src=(store.ui&&store.ui.weights)||{};const out={};let sum=0;
+  for(const k in GO_WEIGHTS_DEFAULT){const v=Number(src[k]);out[k]=(isFinite(v)&&v>=0&&v<=100)?v:GO_WEIGHTS_DEFAULT[k];sum+=out[k]}
+  if(!sum)for(const k in GO_WEIGHTS_DEFAULT)out[k]=GO_WEIGHTS_DEFAULT[k];
+  return out
+}
+function goOpenWeights(){const w=goWeights();GO_DIMS.forEach(([k])=>{const e=document.getElementById('gw_'+k);if(e)e.value=w[k]});
+  const s=document.getElementById('gwSum');if(s)s.textContent='当前合计 '+Object.values(w).reduce((a,b)=>a+b,0)+'（按比例归一化，不必凑 100）';openMask('mWeights')}
+function goSaveWeights(){const w={};GO_DIMS.forEach(([k])=>{const e=document.getElementById('gw_'+k);w[k]=e?clamp(num0(e.value),0,100):GO_WEIGHTS_DEFAULT[k]});
+  store.ui=store.ui||{};store.ui.weights=w;persist();closeMask('mWeights');renderDash();renderProjects();toast('权重已保存（存服务器，全员一致）')}
+function goResetWeights(){store.ui=store.ui||{};store.ui.weights=Object.assign({},GO_WEIGHTS_DEFAULT);persist();closeMask('mWeights');renderDash();renderProjects();toast('已恢复默认权重')}
+function goLevelLabel(t){return {must:'重点投入',watch:'观察加力',drop:'暂缓/放弃',data:'数据不足'}[t]||t}
+function goLevelColor(t){return t==='must'?'var(--ok)':t==='watch'?'#b25e0c':t==='data'?'#6b7488':'var(--bad)'}
+function monthGapFromNow(ym){if(!ym||String(ym).length<7)return 0;const t=new Date();
+  return (Number(String(ym).slice(0,4))*12+Number(String(ym).slice(5,7)))-((t.getFullYear()*12)+(t.getMonth()+1))}
+function goScore(p){
+  const w=goWeights(),missing=[],flags=[];
+  const st=c139Stats(p.c139), m=marginOf(p);
+  const people=store.stakeholders[p.id]||[], cov=chainCoverage(p.id), fu=fuList(p.id);
+  const intel=store.compintel.filter(x=>x.projectId===p.id);
+  /* A 赢面：直接取 C139 赢单率 */
+  const win=st.rate;
+  if(!(p.c139&&(p.c139.coach||p.c139.is1W||(p.c139.consensus||[]).some(Boolean)||(p.c139.factors||[]).some(Boolean))))missing.push('C139 未评估');
+  /* B 关系密度：关键角色覆盖 + 教练 + 高影响力反对者 + 立场未知占比 */
+  let rel=cov.covered/KEY_ROLES.length*60;
+  if(people.some(x=>x.role==='教练/内线'))rel+=15;else missing.push('无教练/内线');
+  if(people.some(x=>x.influence==='high'&&x.attitude==='oppose')){rel-=25;flags.push('存在高影响力反对者')}
+  if(people.length){const unk=people.filter(x=>!x.attitude||x.attitude==='unknown').length;rel-=Math.round(unk/people.length*15)}
+  if(!people.length){rel=0;missing.push('未录入关键人')}
+  rel=clamp(rel,0,100);
+  /* C 沟通热度：近 30/60 天跟进次数 + 距今间隔 + 跟进人覆盖角色数 */
+  const n30=fu.filter(x=>daysSince(x.date)<=30).length, n60=fu.filter(x=>daysSince(x.date)<=60).length;
+  const gap=fu.length?Math.min.apply(null,fu.map(x=>daysSince(x.date))):999;
+  const byRoles=new Set(fu.map(x=>x.by).filter(Boolean)).size;
+  let comm=Math.min(60,n30*20)+Math.min(20,(n60-n30)*7)+(gap<=14?20:gap<=30?14:gap<=45?7:0)+(byRoles>=3?10:byRoles>=2?5:0);
+  if(!fu.length){comm=0;missing.push('无跟进记录')}else if(gap>60)flags.push('已 '+gap+' 天没有跟进');
+  comm=clamp(comm,0,100);
+  /* D 竞争位势：是否掌握对手报价、情报条数与新鲜度、是否识别强弱、在位承建商扣分 */
+  let comp;
+  if(!intel.length){comp=50;missing.push('未录入对手情报')}
+  else{
+    const last=intel.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
+    comp=(last.price?30:0)+(intel.length>=2?20:10)+(daysSince(last.date)<=90?20:5)+(last.weaknesses?15:0)+(last.strengths?10:0);
+    if(/一期|承建|粘性|关系深|在位/.test(String(last.strengths||''))){comp-=25;flags.push('对手是在位承建商（关系型竞争）')}
+    if(!last.price)missing.push('不掌握对手报价');
+    comp=clamp(comp,0,100);
+  }
+  /* E 商业价值：体量分档 + 软件占比（毛利结构）+ 已知毛利率 */
+  const estTier=m.est>=800?100:m.est>=500?85:m.est>=300?70:m.est>=150?55:m.est>0?40:0;
+  const swScore=m.est?clamp(Math.round(m.sw/m.est/0.6*100),0,100):0;
+  let value;
+  if(!m.est){value=40;missing.push('未填预估合同额')}
+  else if(m.won&&m.cost)value=clamp(estTier*0.45+swScore*0.25+Math.min(100,(m.rate||0)*2.5)*0.3,0,100);
+  else value=clamp(estTier*0.6+swScore*0.4,0,100);
+  /* F 推进健康度：逾期下一步、高风险未关闭、有无待办、签约时点远近 */
+  const steps=p.nextSteps||[];
+  const over=steps.filter(s=>!s.done&&s.due&&dueState(s.due)==='over').length;
+  const openRisk=(p.risks||[]).filter(r=>r.status!=='已关闭');
+  const hiRisk=openRisk.filter(r=>r.level==='高').length;
+  let health=70-over*15-hiRisk*20-(openRisk.length-hiRisk)*8;
+  if(!steps.filter(s=>!s.done).length){health-=30;missing.push('没有未完成的下一步')}
+  if(!p.progressText)missing.push('未填当前进展');
+  const mo=monthGapFromNow(p.expectSignMonth);
+  if(mo>12){health-=15;flags.push('预计签约在 '+mo+' 个月以后，变数与资源占用偏长')}
+  health=clamp(health,0,100);
+  /* 判断背离：人填的级别 vs 模型评分 vs 实际动作 */
+  if(p.oppLevel==='控单'&&st.rate<50)flags.push('自称控单，但 C139 只有 '+st.rate+'%');
+  if(p.oppLevel==='了解中'&&cov.covered>=3)flags.push('级别偏保守，但决策链已覆盖 '+cov.covered+'/'+KEY_ROLES.length);
+  if(st.rate>=85&&fu.length&&gap>45)flags.push('赢单率高却 '+gap+' 天没跟进，容易被偷');
+  const dims={win,rel,comm,comp,value,health};
+  let sum=0,tw=0;for(const k in dims){sum+=dims[k]*w[k];tw+=w[k]}
+  const score=tw?clamp(sum/tw,0,100):0;
+  const insufficient=missing.length>=3;
+  const tierObj=GO_TIERS.find(t=>score>=t.min)||GO_TIERS[2];
+  return {score,dims,missing,flags,insufficient,tier:insufficient?'data':tierObj.k,tierLabel:insufficient?'数据不足':tierObj.label,
+    gap,n30,over,hiRisk,riskOpen:openRisk.length,cov:cov.covered+'/'+KEY_ROLES.length,
+    est:m.est,sw:m.sw,won:m.won,cost:m.cost,profit:m.profit,margin:m.rate,c139:st.rate,intel:intel.length,fu:fu.length,people:people.length}
+}
+function goSummary(list){const s={must:0,watch:0,drop:0,data:0};list.forEach(p=>{s[goScore(p).tier]++});return s}
+function goDimsBarHtml(g){
+  return GO_DIMS.map(([k,lab])=>{const v=g.dims[k];
+    return `<i class="dimbar" title="${lab} ${v} 分" style="width:${Math.max(3,Math.round(v/100*26))}px;background:${v>=70?'var(--ok)':v>=45?'#b25e0c':'var(--bad)'}"></i>`}).join('')}
+function goAiLineHtml(p){const ai=p.aiGo;if(!ai)return '';
+  if(!ai.verdict)return `<small style="color:var(--sub)">🤖 已复核（${esc(ai.at)}）：${esc(String(ai.raw||'').slice(0,80))}</small>`;
+  return `<small style="color:var(--sub)">🤖 AI ${ai.score}% · ${esc(ai.verdict)}${ai.action?' · '+esc(ai.action):''}（${esc(ai.at)}）</small>`}
+function goRowHtml(p,g){
+  const hint=g.flags[0]||g.missing[0]||'';
+  return `<tr><td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${p.id}')">${esc(p.name)}</b>
+      <div>${goDimsBarHtml(g)} <small style="color:var(--sub)">${esc(p.customer)}${hint?' · '+esc(hint):''}</small></div>
+      ${goAiLineHtml(p)}</td>
+    <td style="text-align:right;white-space:nowrap">
+      <span class="pct" style="font-size:19px;font-weight:800;color:${goLevelColor(g.tier)}">${g.score}</span>
+      <span class="tag" style="color:${goLevelColor(g.tier)}">${g.tierLabel}</span><br>
+      <button class="btn sm ghost" id="aib_${p.id}" onclick="aiJudge('${p.id}')">${p.aiGo?'重新复核':'🤖 AI 复核'}</button></td></tr>`
+}
+function goPrompt(p,g){
+  const w=goWeights();
+  return ['你是资深售前总监，基于下面的结构化指标判断这个项目要不要继续投入售前资源。',
+    '项目：'+p.name+'（甲方：'+p.customer+'；阶段：'+p.stage+'；自评级别：'+(p.oppLevel||'—')+'；销售：'+(p.sales||'—')+'；售前：'+(p.presales||'—')+'）',
+    '当前进展：'+(p.progressText||'（未填写）'),
+    '管理提示：'+(g.flags.length?g.flags.join('；'):'无'),
+    '六维指标（0-100；权重 '+JSON.stringify(w)+'）：赢面 '+g.dims.win+'（C139 '+g.c139+'%）｜关系 '+g.dims.rel+'（关键角色覆盖 '+g.cov+'，共 '+g.people+' 人）｜沟通 '+g.dims.comm+'（近30天跟进 '+g.n30+' 次，距今 '+(g.gap>900?'无记录':g.gap+' 天')+'）｜竞争 '+g.dims.comp+'（对手情报 '+g.intel+' 条）｜价值 '+g.dims.value+'（预估 '+g.est+' 万，软件 '+g.sw+' 万，中标 '+(g.won||'未定')+' 万，成本 '+(g.cost||'未定')+' 万，毛利 '+(g.profit||'未定')+' 万，毛利率 '+(g.margin==null?'未定':g.margin+'%')+'）｜健康 '+g.dims.health+'（逾期下一步 '+g.over+' 项，高风险未关闭 '+g.hiRisk+' 项）',
+    '本地规则分：'+g.score+'（'+g.tierLabel+'）',
+    '数据缺口：'+(g.missing.length?g.missing.join('、'):'无'),
+    '请只输出一行 JSON，不要任何多余文字，格式：{"score":0-100,"verdict":"GO|谨慎GO|NO-GO","reasons":["理由1","理由2","理由3"],"gaps":["还要补什么"],"action":"一句话行动建议"}',
+    '要求：赢面与商业价值都要权衡，高分但只卖硬件代理或毛利薄的应下调；数据缺口大不要直接判 NO-GO，而要在 gaps 里要求补信息；理由必须落到具体指标，不要空话。'].join('\n')
+}
+function goParseJson(text){
+  const m=String(text||'').match(/\{[\s\S]*\}/);if(!m)return null;
+  try{const o=JSON.parse(m[0]);return (typeof o.score==='number'&&o.verdict)?o:null}catch(e){return null}
+}
+async function aiJudge(pid){
+  const p=getProj(pid);if(!p)return;
+  const g=goScore(p);
+  const btn=document.getElementById('aib_'+pid);if(btn){btn.disabled=true;btn.textContent='复核中…'}
+  try{
+    const r=await fetch('/api/ai/judge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:pid,prompt:goPrompt(p,g)})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+    const o=goParseJson(j.text);
+    p.aiGo=o?{score:o.score,verdict:o.verdict,reasons:o.reasons||[],gaps:o.gaps||[],action:o.action||'',at:today(),local:g.score}
+      :{raw:String(j.text||'').slice(0,600),at:today(),local:g.score};
+    persist();renderDash();renderProjects();if(currentPage()==='detail')renderDetail();
+    toast(o?('AI 判定 '+o.score+'% · '+o.verdict):'AI 已回复（未返回规范 JSON，已存原文）')
+  }catch(e){toast('AI 复核失败：'+((e&&e.message)||e))}
+  finally{const b2=document.getElementById('aib_'+pid);if(b2){b2.disabled=false;b2.textContent='重新复核'}}
+}
+function renderDtGo(p){
+  const g=goScore(p),w=goWeights();
+  const DIM_DESC={win:'C139 赢单率（教练/1Win/共识/要素综合）',rel:'关键决策角色覆盖、有无教练、高影响力反对者、立场未知占比',
+    comm:'近 30/60 天跟进次数、距今间隔、跟进人覆盖角色数',comp:'是否掌握对手报价、情报条数与新鲜度、是否识别对手强弱、在位承建商扣分',
+    value:'预估体量、软件占比（毛利结构）、已知毛利率',health:'逾期下一步、高风险未关闭、有无待办、预计签约时点远近'};
+  const rows=GO_DIMS.map(([k,lab])=>{const v=g.dims[k];
+    return `<tr><td><b>${lab}</b><br><small style="color:var(--sub)">${DIM_DESC[k]}</small></td>
+      <td style="width:70px"><b style="color:${v>=70?'var(--ok)':v>=45?'#b25e0c':'var(--bad)'};font-size:16px">${v}</b></td>
+      <td style="width:120px"><div class="fbar"><i style="width:${v}%">${v}</i></div></td>
+      <td style="width:60px;color:var(--sub)">${w[k]}%</td><td style="width:70px"><b>${Math.round(v*w[k]/10)}</b></td></tr>`}).join('');
+  const ai=p.aiGo;
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
+      <div><h3 style="margin:0">投入决策 GO / NO-GO</h3>
+      <div style="font-size:12px;color:var(--sub)">C139 看能不能赢，这里看值不值得压资源；六维均由系统已有数据算出</div></div>
+      <div style="text-align:right"><div style="font-size:34px;font-weight:800;line-height:1;color:${goLevelColor(g.tier)}">${g.score}<small style="font-size:13px;font-weight:400"> /100</small></div>
+      <span class="tag" style="color:${goLevelColor(g.tier)}">${g.tierLabel}</span>
+      <div style="margin-top:6px"><button class="btn sm" id="aib_${p.id}" onclick="aiJudge('${p.id}')">${ai?'重新复核':'🤖 AI 复核'}</button>
+      <button class="btn sm ghost" onclick="goOpenWeights()">⚖ 权重</button></div></div></div>
+    <div style="overflow-x:auto;margin-top:12px"><table><tr><th>维度</th><th>得分</th><th></th><th>权重</th><th>加权</th></tr>${rows}</table></div>
+    ${g.flags.length?`<div class="card" style="background:#fff8f8;border:1px solid #f3c6ce;margin-top:12px"><h3 style="color:var(--bad);margin:0 0 6px">判断背离与管理提示</h3>${g.flags.map(f=>`<div>· ${esc(f)}</div>`).join('')}</div>`:''}
+    ${g.missing.length?`<div class="hint" style="margin-top:10px"><b>数据缺口（${g.missing.length} 项）</b>：${g.missing.map(esc).join('、')}
+      ${g.insufficient?'—— 缺 3 项以上，本次结论按「数据不足」处理，不判为放弃':''}</div>`:''}
+    ${ai&&ai.verdict?`<div class="card" style="margin-top:12px"><h3>🤖 AI 复核（${esc(ai.at)}，本地规则分 ${ai.local}）</h3>
+      <div style="font-size:15px"><b>${esc(ai.verdict)}</b> · 判定投入度 <b style="color:${ai.score>=70?'var(--ok)':ai.score>=50?'#b25e0c':'var(--bad)'}">${ai.score}%</b></div>
+      ${ai.reasons&&ai.reasons.length?`<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--sub)">理由</b>${ai.reasons.map(r=>`<div>· ${esc(r)}</div>`).join('')}</div>`:''}
+      ${ai.gaps&&ai.gaps.length?`<div style="margin-top:8px"><b style="font-size:12.5px;color:var(--sub)">还要补什么</b>${ai.gaps.map(r=>`<div>· ${esc(r)}</div>`).join('')}</div>`:''}
+      ${ai.action?`<div class="hint" style="margin-top:8px"><b>行动建议：</b>${esc(ai.action)}</div>`:''}</div>`:''}
+    ${ai&&ai.raw?`<div class="card" style="margin-top:12px"><h3>🤖 AI 复核原文（未解析到规范 JSON）</h3><div style="white-space:pre-wrap;font-size:12.5px">${esc(ai.raw)}</div></div>`:''}
+    <div class="hint" style="margin-top:12px">分数低有两种可能：真的不值得投，或者你还没把信息录进来。看上面的「数据缺口」区分这两件事。</div></div>`
+}
+
 /* ================= 仪表盘 ================= */
 function renderDash(){
   const dys=document.getElementById('dashYearSlot');if(dys)dys.innerHTML=yearSelectHtml('dashYearSel');
@@ -1076,6 +1250,25 @@ function renderDash(){
   const events=[];ps.forEach(p=>(p.timeline||[]).slice(0,3).forEach(t=>events.push({...t,pname:p.name,id:p.id})));
   events.sort((a,b)=>b.d.localeCompare(a.d));
   document.getElementById('dashRecent').innerHTML=events.slice(0,8).map(e=>`<div class="tl-item"><div class="d">${esc(e.d)}</div><div class="t"><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${e.id}')">${esc(e.pname)}</b> · ${esc(e.t)}</div></div>`).join('')||'<div class="empty">暂无动态</div>';
+  /* 商机投入决策 GO / NO-GO：只评在跟项目 */
+  const w0=goWeights();
+  const scored=active.map(p=>({p,g:goScore(p)})).sort((a,b)=>b.g.score-a.g.score);
+  const sum=goSummary(active);
+  const slot=document.getElementById('dashGoSummary');
+  if(slot)slot.innerHTML=`<span class="gosum" onclick="goProjects({go:'must',year:'${fyYear}'})"><b style="color:var(--ok)">${sum.must}</b> 重点投入 →</span>
+    <span class="gosum" onclick="goProjects({go:'watch',year:'${fyYear}'})"><b style="color:#b25e0c">${sum.watch}</b> 观察加力 →</span>
+    <span class="gosum" onclick="goProjects({go:'drop',year:'${fyYear}'})"><b style="color:var(--bad)">${sum.drop}</b> 暂缓/放弃 →</span>
+    <span class="gosum" onclick="goProjects({go:'data',year:'${fyYear}'})"><b style="color:#6b7488">${sum.data}</b> 数据不足 →</span>
+    <span style="flex:1"></span><button class="btn sm ghost" onclick="goOpenWeights()">⚖ 权重设置</button>
+    <small style="color:var(--sub)">权重：赢面 ${w0.win} / 关系 ${w0.rel} / 沟通 ${w0.comm} / 竞争 ${w0.comp} / 价值 ${w0.value} / 健康 ${w0.health}</small>`;
+  const goSlot=document.getElementById('dashGo'), noSlot=document.getElementById('dashNoGo');
+  if(goSlot)goSlot.innerHTML=scored.length?'<table>'+scored.filter(x=>x.g.tier!=='data').slice(0,5).map(x=>goRowHtml(x.p,x.g)).join('')+'</table>':'<div class="empty">当前口径下没有在跟项目</div>';
+  if(noSlot){
+    const tail=scored.filter(x=>x.g.tier!=='data').slice().reverse();
+    noSlot.innerHTML=tail.length?'<table>'+tail.slice(0,5).map(x=>goRowHtml(x.p,x.g)).join('')+'</table>':'<div class="empty">暂无可评估项目</div>';
+    const bad=scored.filter(x=>x.g.flags.length).slice(0,4);
+    noSlot.innerHTML+=bad.length?`<div class="hint" style="margin-top:10px"><b>判断背离提示</b>${bad.map(x=>`<div>· ${esc(x.p.name)}：${esc(x.g.flags[0])}</div>`).join('')}</div>`:'';
+  }
 }
 
 /* ================= 二期：跟进记录 / 下一步计划 / 风险与问题 ================= */
@@ -1194,7 +1387,7 @@ function exportAll(){download('售前工作台数据备份-'+today()+'.json',JSO
 function resetDemo(){
   if(!confirm('重置为演示数据？当前服务器与本机的工作数据将被覆盖。'))return;
   store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
-    stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{}};
+    stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{},ui:{}};
   _sent={};_rev={};
   seed();persist();
   pushImportToServer().then(function(){show('dash');renderDash();renderProjects();toast('已重置为演示数据')});
@@ -2013,8 +2206,8 @@ function seed(){
  * 覆盖库之前会把本机全量快照存进 localStorage['presales_workbench_v1_legacy']（每会话一次），防误覆盖。
  * rev 冲突（拉到数据与写回之间同事又改了）→ 提示后强制覆盖，服务器 rev +1。
  */
-var SYNC_COLLECTIONS=['projects','kb','docs','tasks','kbTree','pdocs','checklists','stakeholders','contracts','quotations','compintel','requirements','followups'];
-var SYNC_LABEL={projects:'项目',kb:'知识库',docs:'方案文档',tasks:'任务',kbTree:'知识库目录',pdocs:'项目资料',checklists:'检查清单',stakeholders:'干系人',contracts:'合同',quotations:'报价',compintel:'竞争情报',requirements:'需求',followups:'跟进记录'};
+var SYNC_COLLECTIONS=['projects','kb','docs','tasks','kbTree','pdocs','checklists','stakeholders','contracts','quotations','compintel','requirements','followups','ui'];
+var SYNC_LABEL={projects:'项目',kb:'知识库',docs:'方案文档',tasks:'任务',kbTree:'知识库目录',pdocs:'项目资料',checklists:'检查清单',stakeholders:'干系人',contracts:'合同',quotations:'报价',compintel:'竞争情报',requirements:'需求',followups:'跟进记录',ui:'界面配置'};
 var SYNC_POLL_MS=60000;
 var _rev={}, _sent={}, _online=false, _lastErr='', _pushTimer=null, _pushing=false, _pushAgain=false, _legacyGuard=false;
 // 浏览器实例标识：无鉴权场景下写进库的 updated_by，出问题时能区分是哪台机器写的

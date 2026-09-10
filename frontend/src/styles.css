@@ -75,6 +75,13 @@ tr:hover td{background:#f8faff}
 .funnel-row.clickable:hover .fname{color:var(--brand)}
 .tag.clickable{cursor:pointer}
 .tag.clickable:hover{outline:1px solid var(--brand)}
+/* ===== 商机投入决策 GO / NO-GO ===== */
+.gosum-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--panel);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:10px 16px;margin-bottom:14px;font-size:13px}
+.gosum{cursor:pointer;padding:3px 10px;border-radius:20px;background:#f6f8fd;font-size:12.5px;white-space:nowrap}
+.gosum:hover{background:#e7f0ff}
+.gosum b{font-size:16px;margin-right:3px}
+.dimbar{display:inline-block;height:6px;border-radius:3px;margin-right:2px;vertical-align:middle}
 .kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--grad)}
 .kpi .num{font-size:26px;font-weight:800;margin:4px 0}
 .kpi .lb{font-size:12px;color:var(--sub)}

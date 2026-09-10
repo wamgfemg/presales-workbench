@@ -44,6 +44,11 @@
         <div style="display:flex;gap:10px;align-items:center"><span id="dashYearSlot"></span>
         <button class="btn" onclick="openProjectModal()">＋ 新建项目</button></div></div>
       <div class="kpis" id="dashKpis"></div>
+      <div class="gosum-bar" id="dashGoSummary"></div>
+      <div class="grid g2">
+        <div class="card"><h3>商机投入决策 · 建议重点投入（GO）</h3><div id="dashGo"></div></div>
+        <div class="card"><h3>商机投入决策 · 建议暂缓 / 放弃（NO-GO）</h3><div id="dashNoGo"></div></div>
+      </div>
       <div class="grid g2">
         <div class="card"><h3>项目阶段漏斗</h3><div id="dashFunnel"></div></div>
         <div class="card"><h3>赢单率 TOP 项目（C139）</h3><div id="dashTop"></div></div>
@@ -79,6 +84,10 @@
             <option value="all">全部级别</option><option>控单</option><option>博弈</option><option>了解中</option>
           </select>
           <select id="projOwnerFilter" onchange="pfSet('owner',this.value)"><option value="">全部负责人</option></select>
+          <select id="projGoFilter" onchange="pfSet('go',this.value)">
+            <option value="">全部投入建议</option><option value="must">重点投入</option>
+            <option value="watch">观察加力</option><option value="drop">暂缓/放弃</option><option value="data">数据不足</option>
+          </select>
           <select id="projWarnFilter" onchange="pfSet('warn',this.value)">
             <option value="">不限预警</option><option value="warn">有预警（逾期或高风险）</option>
             <option value="over">有逾期下一步</option><option value="risk">有高风险未关闭</option>
@@ -109,6 +118,7 @@
         <button data-t="risk">风险与问题</button>
         <button data-t="task">推进计划与任务</button>
         <button data-t="tl">时间线</button>
+        <button data-t="go">投入决策 GO</button>
         <button data-t="c">C139 快评</button>
         <button data-t="doc">本项目文档</button>
         <button data-t="stk">项目干系人</button>
@@ -233,6 +243,24 @@
     </section>
   </main>
 </div>
+
+<!-- GO 权重设置 -->
+<div class="mask" id="mWeights"><div class="modal">
+  <h3><span>投入决策 · 权重设置</span><button class="x" onclick="closeMask('mWeights')">✕</button></h3>
+  <div class="hint" style="margin-bottom:10px">六个维度各自 0-100 的相对权重，按比例归一化（不必凑 100）。改一次全员共享（存服务器），改完 GO 分与榜单立即重算。</div>
+  <div class="grid g2">
+    <label class="f"><span>赢面（C139）</span><input id="gw_win" type="number" min="0" max="100"></label>
+    <label class="f"><span>关系密度</span><input id="gw_rel" type="number" min="0" max="100"></label>
+    <label class="f"><span>沟通热度</span><input id="gw_comm" type="number" min="0" max="100"></label>
+    <label class="f"><span>竞争位势</span><input id="gw_comp" type="number" min="0" max="100"></label>
+    <label class="f"><span>商业价值</span><input id="gw_value" type="number" min="0" max="100"></label>
+    <label class="f"><span>推进健康度</span><input id="gw_health" type="number" min="0" max="100"></label>
+  </div>
+  <div id="gwSum" style="font-size:12.5px;color:var(--sub);margin:6px 0 10px"></div>
+  <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mWeights')">取消</button>
+    <button class="btn ghost" style="margin-left:8px" onclick="goResetWeights()">恢复默认</button>
+    <button class="btn" style="margin-left:8px" onclick="goSaveWeights()">保存</button></div>
+</div></div>
 
 <!-- 项目编辑弹窗 -->
 <div class="mask" id="mProject"><div class="modal">
