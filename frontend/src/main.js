@@ -1,6 +1,6 @@
 
 /* ================= 数据层 ================= */
-const LS_KEY='presales_workbench_v4';
+const LS_KEY='presales_workbench_v5';
 let store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
   stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{}};
 let editingProjectId=null, currentProjectId=null, kbEditingId=null;
