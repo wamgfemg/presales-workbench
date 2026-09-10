@@ -55,6 +55,10 @@ label.f>span{display:block;font-size:12px;color:var(--sub);margin-bottom:5px}
 /* ===== 表格 ===== */
 table{width:100%;border-collapse:collapse}
 th{font-size:12px;color:var(--sub);text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);background:#f8fafd;white-space:nowrap}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--brand);background:#eef3fd}
+th.sortable i{font-style:normal;font-size:10px;margin-left:3px;color:var(--brand)}
+th.sortable.on{color:var(--brand);font-weight:700}
 td{padding:10px;border-bottom:1px solid #f0f3f9;font-size:13px;vertical-align:top}
 tr:hover td{background:#f8faff}
 /* ===== 仪表盘 ===== */
@@ -262,3 +266,14 @@ tr:hover td{background:#f8faff}
 .chain-person .pk.st{color:#1c5ed8}
 .chain-person .pk.st span{background:#e7f0ff;color:#1c5ed8}
 .chain-person .pa{margin-top:8px;display:flex;gap:6px}
+/* ===== 干系人九宫格 / 报价明细 ===== */
+table.mtx{width:auto;margin-top:4px}
+table.mtx th{background:transparent;border-bottom:0;font-weight:600;padding:6px 10px}
+table.mtx td{text-align:center;border:1px solid var(--line);font-weight:700;width:74px;padding:10px}
+table.mtx td.ok{background:#e6f4ea;color:var(--ok)}
+table.mtx td.bad{background:#fde8ef;color:var(--bad)}
+table.mtx td.mid{background:#fff2df;color:#b25e00}
+table.mtx td.zero{color:#c3c9d6;background:#fbfcfe;font-weight:400}
+table.mtx td.sum{background:#f8fafd;color:var(--sub);border-color:var(--line)}
+table.mtx td.on{outline:2px solid var(--brand);outline-offset:-2px}
+tr.qt-line td{background:#fbfcfe;font-size:12.5px;padding-top:6px;padding-bottom:6px}

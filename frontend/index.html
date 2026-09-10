@@ -63,11 +63,18 @@
         </div></div>
       <div class="card">
         <div class="searchbar">
-          <input id="projSearch" placeholder="搜索项目 / 客户名称…" oninput="renderProjects()">
+          <input id="projSearch" placeholder="搜索项目 / 甲方 / 销售 / 售前…" oninput="renderProjects()">
           <select id="projStageFilter" onchange="renderProjects()">
             <option value="all">全部阶段</option>
             <option>前期交流</option><option>方案阶段</option><option>招投标阶段</option>
             <option>已中标</option><option>已流标</option><option>已输标</option><option>项目已取消</option>
+          </select>
+          <select id="projOppFilter" onchange="renderProjects()">
+            <option value="all">全部级别</option><option>控单</option><option>博弈</option><option>了解中</option>
+          </select>
+          <select id="projOwnerFilter" onchange="renderProjects()"><option value="">全部负责人</option></select>
+          <select id="projWarnFilter" onchange="renderProjects()">
+            <option value="">全部项目</option><option value="warn">只看预警（逾期/高风险）</option>
           </select>
         </div>
         <div style="overflow-x:auto"><table id="projTable"></table></div>

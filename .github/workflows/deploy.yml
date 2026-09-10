@@ -57,7 +57,7 @@ jobs:
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
-            frontend server deploy \
+            frontend server deploy test \
             "$USER_NAME@$HOST:/opt/presales-workbench/"
 
       - name: Restart service and health check

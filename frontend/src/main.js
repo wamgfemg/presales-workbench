@@ -140,15 +140,47 @@ function saveProject(){
 function addTl(p,text){p.timeline=p.timeline||[];p.timeline.unshift({d:today(),t:text})}
 function delProject(id){if(!confirm('确定删除该项目？'))return;store.projects=store.projects.filter(p=>p.id!==id);persist();renderProjects();toast('已删除')}
 
+let projSort={k:'',d:1};
+function projVal(p,k){switch(k){
+  case 'name':return p.name||'';case 'customer':return p.customer||'';
+  case 'stage':return STAGES.indexOf(p.stage);case 'oppLevel':return OPP_LEVELS.indexOf(p.oppLevel);
+  case 'est':return amountsOf(p).est;case 'sw':return amountsOf(p).sw;
+  case 'rate':return c139Stats(p.c139).rate;case 'expect':return p.expectSignMonth||p.keyDate||'';
+  case 'sales':return p.sales||'';case 'presales':return p.presales||'';default:return 0}}
+function sortProjects(k){if(projSort.k===k)projSort.d=-projSort.d;else{projSort.k=k;projSort.d=1}renderProjects()}
+function pth(k,label,style){const on=projSort.k===k;
+  return `<th class="sortable${on?' on':''}"${style?` style="${style}"`:''} onclick="sortProjects('${k}')">${label}${on?`<i>${projSort.d>0?'▲':'▼'}</i>`:''}</th>`}
+function projHasWarn(p){
+  return (p.nextSteps||[]).some(s=>!s.done&&s.due&&dueState(s.due)==='over')
+    || (p.risks||[]).some(r=>r.level==='高'&&r.status!=='已关闭')}
 function renderProjects(){
   const kw=(document.getElementById('projSearch').value||'').toLowerCase();
   const st=document.getElementById('projStageFilter').value;
-  let list=store.projects.filter(p=>(st==='all'||p.stage===st)&&(!kw||(p.name+p.customer).toLowerCase().includes(kw)));
+  const opp=document.getElementById('projOppFilter').value;
+  const owSel=document.getElementById('projOwnerFilter');
+  const names=[...new Set(store.projects.flatMap(p=>[p.sales,p.presales].filter(Boolean)))].sort((a,b)=>String(a).localeCompare(String(b),'zh'));
+  const oc=owSel.value;
+  owSel.innerHTML='<option value="">全部负责人</option>'+names.map(n=>`<option>${esc(n)}</option>`).join('');
+  if(names.includes(oc))owSel.value=oc;
+  const ow=owSel.value;
+  const warn=document.getElementById('projWarnFilter').value==='warn';
+  let list=store.projects.filter(p=>
+    (st==='all'||p.stage===st)
+    &&(opp==='all'||p.oppLevel===opp)
+    &&(!ow||p.sales===ow||p.presales===ow)
+    &&(!warn||projHasWarn(p))
+    &&(!kw||(p.name+p.customer+(p.sales||'')+(p.presales||'')).toLowerCase().includes(kw)));
+  if(projSort.k)list=list.slice().sort((a,b)=>{
+    const x=projVal(a,projSort.k),y=projVal(b,projSort.k);
+    const c=(typeof x==='number'&&typeof y==='number')?(x-y):String(x).localeCompare(String(y),'zh');
+    return c*projSort.d});
   const t=document.getElementById('projTable');
-  if(!list.length){t.innerHTML='<tr><td colspan="11"><div class="empty">暂无项目，点击右上角「新建项目」开始</div></td></tr>';return}
-  t.innerHTML=`<tr><th>项目</th><th>甲方</th><th>阶段</th><th>商机级别</th><th>预估(万)</th><th>软件(万)</th><th>C139赢单率</th><th>预计签约</th><th>销售</th><th>售前</th><th style="width:170px">操作</th></tr>`+
-  list.map(p=>{const s=c139Stats(p.c139);const m=amountsOf(p);return `<tr>
-    <td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${p.id}')">${esc(p.name)}</b></td>
+  if(!list.length){t.innerHTML='<tr><td colspan="11"><div class="empty">没有符合条件的项目</div></td></tr>';return}
+  t.innerHTML=`<tr>${pth('name','项目')}${pth('customer','甲方')}${pth('stage','阶段')}${pth('oppLevel','商机级别')}
+    ${pth('est','预估(万)')}${pth('sw','软件(万)')}${pth('rate','C139赢单率')}${pth('expect','预计签约')}${pth('sales','销售')}${pth('presales','售前')}
+    <th style="width:170px">操作</th></tr>`+
+  list.map(p=>{const s=c139Stats(p.c139);const m=amountsOf(p);const warn2=projHasWarn(p);return `<tr>
+    <td><b style="cursor:pointer;color:var(--brand)" onclick="openDetail('${p.id}')">${esc(p.name)}</b>${warn2?' <span class="tag" style="background:#fde8ef;color:var(--bad)" title="有逾期下一步或高风险未关闭">预警</span>':''}</td>
     <td>${esc(p.customer)}</td><td>${stageBadge(p.stage)}</td><td>${oppBadge(p.oppLevel)}</td>
     <td>${m.est?fmtWan(m.est):'—'}</td><td>${m.sw?fmtWan(m.sw):'—'}</td>
     <td><div class="wr"><span class="pct" style="color:${s.rate>=85?'var(--ok)':s.rate>=50?'#b25e0c':'var(--bad)'}">${s.rate}%</span>${zoneBadge(s.zone)}</div></td>
@@ -909,8 +941,10 @@ const CHECK_ITEMS=[
  ['复盘','开标后无论结果，一周内完成复盘并更新知识库']];
 function renderTools(){
   const sel=document.getElementById('chkProj');
-  sel.innerHTML=store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')||'<option value="">暂无项目</option>';
-  if(!sel.value&&currentProjectId)sel.value=currentProjectId;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">— 选择项目 —</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  if(cur&&store.projects.some(p=>p.id===cur))sel.value=cur;
+  else if(!sel.value&&currentProjectId&&store.projects.some(p=>p.id===currentProjectId))sel.value=currentProjectId;
   renderChecklist();
   document.getElementById('methodRef').innerHTML=`
     <div class="kb-item"><b>C139 模型</b><div class="body">C=高质量教练确认（*C值）；1=决定者选定我方；3=三项价值共识；9=九大关键要素。核心逻辑：先建立教练，用教练校准信息，向 1Win 推进。5C 为制胜拐点、6C（无1Win）为死亡拐点。</div></div>
@@ -1107,45 +1141,69 @@ function projSelectHtml(id,onchange,opts={}){
 }
 function fillProjSelect(id,value=''){
   const el=document.getElementById(id);if(!el)return;
-  el.innerHTML='<option value="">— 请选择项目 —</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('');
-  if(value&&store.projects.some(p=>p.id===value))el.value=value;
-  else if(currentProjectId&&store.projects.some(p=>p.id===currentProjectId))el.value=currentProjectId;
+  const cur=el.value;   // 重建 option 会把用户刚选中的值清掉，先记住
+  const opts='<option value="">— 请选择项目 —</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}（${esc(p.customer)}）</option>`).join('');
+  if(el.innerHTML!==opts)el.innerHTML=opts;
+  const has=v=>!!v&&store.projects.some(p=>p.id===v);
+  const want=has(cur)?cur:(has(value)?value:(has(currentProjectId)?currentProjectId:''));
+  if(want)el.value=want;
 }
 
 /* ================= 干系人管理 ================= */
+let stkCell='';   // 形如 high|support，九宫格点选后的筛选条件
 function renderStakeholders(){
   const el=document.getElementById('stkBody');
   fillProjSelect('stkProj',currentProjectId);
   const pid=document.getElementById('stkProj').value;
   const p=getProj(pid);
   if(!p){el.innerHTML='<div class="card"><div class="empty">暂无项目，请先在「项目管理」中创建</div></div>';return}
-  const list=store.stakeholders[pid]||[];
-  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <div><h3 style="margin:0">${esc(p.name)} 干系人</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 共 ${list.length} 人</div></div>
-    <button class="btn" onclick="openStakeholderModal()">＋ 新增干系人</button></div>`;
-  if(!list.length){
-    h+=`<div class="empty">该项目还没有记录关键人</div>
-      <div style="margin-top:10px;font-size:12px;color:var(--sub)">先补必备角色：`+
+  const all=store.stakeholders[pid]||[];
+  const cov=chainCoverage(pid);
+  const noCoach=!all.some(s=>s.role==='教练/内线');
+  const noPhone=all.filter(s=>!(s.phone||'').trim()).length;
+  const [cellInf,cellAtt]=stkCell?stkCell.split('|'):[];
+  const list=all.filter(s=>(!cellInf||s.influence===cellInf)&&(!cellAtt||(s.attitude||'neutral')===cellAtt));
+  const INF=[['high','高影响力'],['medium','中影响力'],['low','低影响力']];
+  const ATT=[['support','支持'],['neutral','中立'],['oppose','反对'],['unknown','未知']];
+  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+    <div><h3 style="margin:0">${esc(p.name)} · 干系人矩阵</h3>
+    <div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 已识别 ${all.length} 人 · ${oppBadge(p.oppLevel)} ${stageBadge(p.stage)}</div></div>
+    <div style="display:flex;gap:8px"><select id="stkProj2" onchange="document.getElementById('stkProj').value=this.value;renderStakeholders()" style="width:230px">
+      ${store.projects.map(x=>`<option value="${x.id}" ${x.id===pid?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
+      <button class="btn" onclick="openStakeholderModal(null,null,'${pid}')">＋ 新增关键人</button></div></div>`;
+  /* 缺口与风险提示 */
+  const tips=[];
+  tips.push(cov.miss.length?`<span style="color:var(--bad)">必备角色缺：${cov.miss.join('、')}（覆盖 ${cov.covered}/${KEY_ROLES.length}）</span>`
+    :`<span style="color:var(--ok)">必备角色已覆盖 ${cov.covered}/${KEY_ROLES.length}</span>`);
+  if(noCoach)tips.push('<span style="color:var(--bad)">尚无教练/内线 —— 按 C139 口径无教练且无 1Win 时赢单率上限只有 50%</span>');
+  if(all.some(s=>s.attitude==='oppose'&&s.influence==='high'))tips.push('<span style="color:var(--bad)">存在高影响力反对者，需优先制定应对</span>');
+  if(noPhone)tips.push(`<span style="color:#b25e0c">${noPhone} 人未留联系方式</span>`);
+  h+=`<div style="font-size:12.5px;display:flex;flex-direction:column;gap:4px;margin-bottom:12px">${tips.map(t=>`<div>· ${t}</div>`).join('')}</div>`;
+  /* 九宫格 */
+  h+=`<table class="mtx"><tr><th></th>${ATT.map(a=>`<th>${a[1]}</th>`).join('')}<th>合计</th></tr>`+
+    INF.map(([iv,il])=>{const row=all.filter(s=>(s.influence||'medium')===iv);
+      return `<tr><th>${il}</th>`+ATT.map(([av])=>{const n=row.filter(s=>(s.attitude||'neutral')===av).length;
+        const key=iv+'|'+av,on=stkCell===key;
+        return `<td class="${n?(av==='oppose'?'bad':av==='support'?'ok':'mid'):'zero'}${on?' on':''}" ${n?`onclick="stkCell='${on?'':key}';renderStakeholders()" style="cursor:pointer"`:''}>${n||'·'}</td>`}).join('')+
+        `<td class="sum">${row.length}</td></tr>`}).join('')+
+    `<tr><th>合计</th>${ATT.map(([av])=>`<td class="sum">${all.filter(s=>(s.attitude||'neutral')===av).length}</td>`).join('')}<td class="sum">${all.length}</td></tr></table>`;
+  h+=`<div class="hint" style="margin-top:8px">点格子可只看该影响力×立场的人；${stkCell?`当前筛选：<b>${stkCell.split('|')[0]==='high'?'高':stkCell.split('|')[0]==='low'?'低':'中'}影响力 · ${ATT.find(a=>a[0]===stkCell.split('|')[1])[1]}</b> <button class="btn sm ghost" onclick="stkCell='';renderStakeholders()">清除</button>`:'售前视角重点看两格：高影响力×反对（风险）与高影响力×未知（信息盲区）'}</div>`;
+  /* 明细 */
+  if(!all.length){
+    h+=`<div class="empty" style="margin-top:12px">该项目还没有记录关键人 —— 先补必备角色：`+
       KEY_ROLES.map(r=>`<button class="btn sm ghost" style="margin:2px" onclick="openStakeholderModal(null,'${r}','${pid}')">＋ ${r}</button>`).join('')+`</div></div>`;
     el.innerHTML=h;return}
-  h+=`<div style="font-size:12px;margin-bottom:8px;color:${chainCoverage(pid).miss.length?'var(--bad)':'var(--ok)'}">关键角色覆盖 ${chainCoverage(pid).covered}/${KEY_ROLES.length}${chainCoverage(pid).miss.length?'，缺：'+chainCoverage(pid).miss.join('、'):'，已覆盖'}</div>`;
-  h+=`<div style="overflow-x:auto"><table><tr><th>姓名</th><th>角色</th><th>部门/职务</th><th>影响力</th><th>立场</th><th>关注重点</th><th>我方策略</th><th style="width:140px">操作</th></tr>`+
-  list.map((s,i)=>`<tr>
-    <td><b>${esc(s.name||'—')}</b></td>
-    <td>${esc(s.role||'—')}</td>
-    <td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
-    <td>${influenceBadge(s.influence)}</td>
-    <td>${attitudeBadge(s.attitude)}</td>
-    <td style="max-width:200px">${esc(s.focus||'')}</td>
-    <td style="max-width:220px">${esc(s.strategy||'')}</td>
-    <td><button class="btn sm ghost" onclick="openStakeholderModal('${s.id}',null,'${pid}')">编辑</button> <button class="btn sm danger" onclick="delStakeholder('${s.id}','${pid}')">删除</button></td>
-  </tr>`).join('')+'</table></div>';
-  h+=`<div style="margin-top:12px"><button class="btn ghost" onclick="chainPid='${pid}';show('chain')">查看决策链视图 →</button></div>`;
-  h+=`<div class="card"><h3>干系人地图速览</h3><div class="grid g4">`+
-    [['high','高'],['medium','中'],['low','低']].map(([v,lab])=>{
-      const cnt=list.filter(s=>(s.influence||'medium')===v).length;
-      return `<div style="background:#f8fafd;border-radius:10px;padding:12px"><div style="font-size:12px;color:var(--sub)">影响力 ${lab}</div><div style="font-size:22px;font-weight:800">${cnt}</div></div>`
-    }).join('')+`</div></div>`;
+  h+=`<div style="overflow-x:auto;margin-top:12px"><table><tr><th>姓名</th><th>角色</th><th>部门/职务</th><th>影响力</th><th>立场</th><th>关注重点</th><th>我方策略</th><th>更新</th><th style="width:130px">操作</th></tr>`+
+  list.map(s=>`<tr>
+    <td><b>${esc(s.name||'—')}</b>${s.phone?`<br><small style="color:var(--sub)">${esc(s.phone)}</small>`:''}</td>
+    <td>${esc(s.role||'—')}</td><td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
+    <td>${influenceBadge(s.influence)}</td><td>${attitudeBadge(s.attitude)}</td>
+    <td style="max-width:190px">${esc(s.focus||'')}</td><td style="max-width:210px">${esc(s.strategy||'')}</td>
+    <td style="white-space:nowrap;color:var(--sub);font-size:12px">${esc(s.updated||'—')}</td>
+    <td><button class="btn sm ghost" onclick="openStakeholderModal('${s.id}',null,'${pid}')">编辑</button>
+        <button class="btn sm danger" onclick="delStakeholder('${s.id}','${pid}')">删除</button></td></tr>`).join('')+'</table></div>'+
+    (list.length!==all.length?`<div class="hint">按格子筛选后显示 ${list.length}/${all.length} 人</div>`:'')+
+    `<div style="margin-top:12px"><button class="btn ghost" onclick="chainPid='${pid}';show('chain')">查看决策链视图 →</button></div></div>`;
   el.innerHTML=h;
 }
 function influenceBadge(v){return v==='high'?'<span class="tag" style="background:#fde8ef;color:var(--bad)">高</span>':v==='low'?'<span class="tag" style="background:#e6f4ea;color:var(--ok)">低</span>':'<span class="tag">中</span>'}
@@ -1269,6 +1327,41 @@ function renderChain(){
 }
 
 /* ================= 合同管理 ================= */
+const CT_STATUS=['洽谈中','已签署','执行中','已结清','已终止'];
+function parseTerms(str){
+  const s=String(str||'');
+  let nums=[];
+  const pct=s.match(/\d+(\.\d+)?\s*%/g);   // 「预付30%、到货60%、质保10%」这类写法
+  if(pct&&pct.length<=6)nums=pct.map(x=>parseFloat(x));
+  else nums=s.split(/[:：\/\-、,，\s]+/).filter(x=>/^\d+(\.\d+)?$/.test(x)).map(Number);
+  if(!nums.length||nums.length>6)return [];
+  const sum=nums.reduce((a,b)=>a+b,0);if(!sum)return [];
+  const names=nums.length===2?['预付款','尾款']:nums.length===3?['预付款','到货款/验收款','质保金']:['预付款','到货款','验收款','质保金'];
+  return nums.map((n,i)=>({name:names[i]||('第'+(i+1)+'期'),ratio:Math.round(n/sum*1000)/10}))
+}
+function ensurePayments(c,amount){
+  const plan=parseTerms(c.paymentTerms);
+  if(!plan.length)return [];
+  c.payments=c.payments||[];
+  plan.forEach((p,i)=>{
+    const old=c.payments[i];
+    c.payments[i]=old?Object.assign({},old,{name:p.name,ratio:p.ratio,amount:amount?Math.round(amount*p.ratio)/100:null}):
+      {id:uid(),name:p.name,ratio:p.ratio,amount:amount?Math.round(amount*p.ratio)/100:null,due:'',paid:false,paidDate:''};
+  });
+  c.payments=c.payments.slice(0,plan.length);
+  return c.payments
+}
+function ctSet(idx,field,val){
+  const pid=document.getElementById('ctProj').value;const c=store.contracts[pid];if(!c||!c.payments||!c.payments[idx])return;
+  c.payments[idx][field]=val;
+  if(field==='paid'&&val&&!c.payments[idx].paidDate)c.payments[idx].paidDate=today();
+  if(field==='paid'&&!val)c.payments[idx].paidDate='';
+  persist();renderContracts()
+}
+function ctRegen(){
+  const pid=document.getElementById('ctProj').value;const c=store.contracts[pid];if(!c)return;
+  c.payments=[];ensurePayments(c,parseFloat(c.amount)||0);persist();renderContracts();toast('已按付款条款重算回款计划')
+}
 function renderContracts(){
   const el=document.getElementById('ctBody');
   fillProjSelect('ctProj',currentProjectId);
@@ -1276,26 +1369,64 @@ function renderContracts(){
   const p=getProj(pid);
   if(!p){el.innerHTML='<div class="card"><div class="empty">暂无项目，请先在「项目管理」中创建</div></div>';return}
   const c=store.contracts[pid]||{attachments:[]};
-  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <div><h3 style="margin:0">${esc(p.name)} 合同信息</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)}</div></div>
-    <button class="btn" onclick="openContractModal()">编辑合同信息</button></div>
+  const amt=parseFloat(c.amount)||0;
+  if(amt&&c.paymentTerms&&!c.payments)ensurePayments(c,amt);
+  const pays=c.payments||[];
+  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+    <div><h3 style="margin:0">${esc(p.name)} · 合同与回款</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)}</div></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select onchange="setContractStatus('${pid}',this.value)" style="padding:5px 8px">${CT_STATUS.map(s=>`<option ${s===(c.status||'洽谈中')?'selected':''}>${s}</option>`).join('')}</select>
+      <button class="btn" onclick="openContractModal()">编辑合同信息</button></div></div>
     <div class="grid g4" style="font-size:13px">`;
   h+=`<div><span style="color:var(--sub)">合同编号</span><br><b>${esc(c.contractNo||'—')}</b></div>`;
-  h+=`<div><span style="color:var(--sub)">合同金额</span><br><b>${c.amount!==undefined&&c.amount!==''?esc(c.amount)+' 万':'—'}</b></div>`;
+  h+=`<div><span style="color:var(--sub)">合同金额</span><br><b>${amt?fmtWan(amt)+' 万':'—'}</b></div>`;
   h+=`<div><span style="color:var(--sub)">签订日期</span><br><b>${esc(c.signDate||'—')}</b></div>`;
   h+=`<div><span style="color:var(--sub)">交付/到期日期</span><br><b>${esc(c.endDate||'—')}</b></div>`;
   h+=`<div><span style="color:var(--sub)">付款条款</span><br><b>${esc(c.paymentTerms||'—')}</b></div>`;
-  h+=`<div><span style="color:var(--sub)">状态</span><br><b>${esc(c.status||'—')}</b></div>`;
-  h+=`</div><div style="margin-top:10px"><span style="color:var(--sub)">备注</span><br>${esc(c.notes||'—')}</div></div>`;
+  h+=`<div><span style="color:var(--sub)">状态</span><br><b>${esc(c.status||'洽谈中')}</b></div>`;
+  h+=`</div><div style="margin-top:10px"><span style="color:var(--sub)">备注</span><br>${esc(c.notes||'—')}</div>`;
+  /* 校验与到期提示 */
+  const tips=[];
+  const won=amountsOf(p).won;
+  if(amt&&won&&Math.abs(amt-won)>0.01)tips.push(`<span style="color:#b25e0c">合同额 ${fmtWan(amt)} 万 与项目中标合同额 ${fmtWan(won)} 万不一致，请确认以哪个为准</span>`);
+  if(amt&&!won)tips.push('<span style="color:var(--sub)">项目主档还没填中标合同额，建议补齐以便做报价/合同/回款三方对账</span>');
+  if(c.endDate){const d=new Date(c.endDate+'T00:00:00'),n=Math.ceil((d-new Date(today()+'T00:00:00'))/86400000);
+    tips.push(n<0?`<span style="color:var(--bad)">交付/到期日已逾期 ${-n} 天</span>`:n<=30?`<span style="color:#b25e0c">距交付/到期日 ${n} 天</span>`:`<span style="color:var(--sub)">距交付/到期日 ${n} 天</span>`)}
+  const overdue=pays.filter(x=>x.due&&!x.paid&&x.due<today());
+  if(overdue.length)tips.push(`<span style="color:var(--bad)">${overdue.length} 期回款已逾期：${overdue.map(x=>x.name+'（'+fmtWan(x.amount||0)+'万，'+x.due+'）').join('、')}</span>`);
+  if(tips.length)h+=`<div style="font-size:12.5px;margin-top:12px;display:flex;flex-direction:column;gap:4px">${tips.map(t=>`<div>· ${t}</div>`).join('')}</div>`;
+  h+=`</div>`;
+  /* 回款计划 */
+  const paidSum=pays.filter(x=>x.paid).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
+  h+=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="margin:0">回款计划</h3>
+      <div style="font-size:12.5px;color:var(--sub)">已回款 <b style="color:var(--ok)">${fmtWan(Math.round(paidSum*10)/10)}</b> 万 · 未回款 <b>${amt?fmtWan(Math.round((amt-paidSum)*10)/10):'—'}</b> 万${amt?' · 回款率 '+Math.round(paidSum/amt*100)+'%':''}
+      ${pays.length?` <button class="btn sm ghost" onclick="ctRegen()">按条款重算</button>`:''}</div></div>`;
+  if(!pays.length){
+    h+=`<div class="empty">${amt&&c.paymentTerms?'无法从付款条款「'+esc(c.paymentTerms)+'」解析比例，请用 3:6:1 这类格式填写':'尚未填写付款条款，填写后自动生成回款计划'}</div></div>`;
+  }else{
+    h+=`<div style="overflow-x:auto"><table><tr><th>期次</th><th>比例</th><th>金额(万)</th><th>计划回款日</th><th>已回款</th><th>实际回款日</th></tr>`+
+    pays.map((x,i)=>`<tr${x.due&&!x.paid&&x.due<today()?' style="background:#fff5f5"':''}>
+      <td>${esc(x.name)}</td><td>${x.ratio}%</td><td>${x.amount!=null?fmtWan(x.amount):'—'}</td>
+      <td><input type="date" value="${esc(x.due||'')}" onchange="ctSet(${i},'due',this.value)" style="padding:3px 6px"></td>
+      <td><input type="checkbox" ${x.paid?'checked':''} onchange="ctSet(${i},'paid',this.checked)"></td>
+      <td>${x.paid?`<input type="date" value="${esc(x.paidDate||'')}" onchange="ctSet(${i},'paidDate',this.value)" style="padding:3px 6px">`:'<span style="color:var(--sub)">—</span>'}</td></tr>`).join('')+'</table></div>';}
+  h+=`<div class="hint" style="margin-top:8px">金额按期次比例自动分摊（合同额 × 比例）；改付款条款后点「按条款重算」，已标记的回款日期会保留在同位置。</div></div>`;
+  /* 附件 */
   h+=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">合同附件</h3>
     <label class="btn sm" style="cursor:pointer">⬆ 上传附件<input type="file" style="display:none" onchange="uploadContractFile(this)"></label></div>`;
   const atts=c.attachments||[];
-  if(!atts.length){h+='<div class="empty">暂无附件</div></div>';el.innerHTML=h;return}
-  h+=`<table><tr><th>文件名</th><th>大小</th><th>上传日期</th><th style="width:140px">操作</th></tr>`+
+  if(!atts.length){h+='<div class="empty">暂无附件（合同扫描件、中标通知书、验收单等）</div></div>';}
+  else h+=`<div style="overflow-x:auto"><table><tr><th>文件名</th><th>大小</th><th>上传日期</th><th style="width:140px">操作</th></tr>`+
   atts.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td>${fmtSize(a.size)}</td><td>${esc(a.date||'—')}</td>
     <td><a class="btn sm ghost" href="/api/files/download/${encodeURIComponent(a.fileId)}" target="_blank">下载</a>
     <button class="btn sm danger" onclick="delContractFile('${a.fileId}')">删除</button></td></tr>`).join('')+'</table></div>';
   el.innerHTML=h;
+}
+function setContractStatus(pid,v){
+  const c=store.contracts[pid];if(!c)return;c.status=v;
+  const p=getProj(pid);if(p)addTl(p,'合同状态→'+v);
+  persist();renderContracts();toast('状态已更新')
 }
 function openContractModal(){
   const pid=document.getElementById('ctProj').value;
@@ -1356,20 +1487,44 @@ function renderQuotations(){
     <div><h3 style="margin:0">${esc(p.name)} 报价记录</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 共 ${list.length} 版</div></div>
     <button class="btn" onclick="openQuotationModal()">＋ 新增报价</button></div>`;
   if(!list.length){h+='<div class="empty">暂无报价，点击右上角新增</div></div>';el.innerHTML=h;return}
-  h+=`<table><tr><th>版本</th><th>日期</th><th>成本合计(万)</th><th>对外报价(万)</th><th>利润(万)</th><th>利润率</th><th>状态</th><th style="width:180px">操作</th></tr>`+
-  list.map(q=>{
+  const vs=list.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const m=amountsOf(p);
+  const latest=vs[0];
+  const lc=latest?sumQtCost(latest):0, lq=latest?sumQtQuote(latest):0;
+  /* 与项目主档的红线比对 */
+  const red=[];
+  if(m.cost) red.push(lc>m.cost?`<span style="color:var(--bad)">报价成本合计 ${fmtWan(lc)} 万 已超项目成本预算 ${fmtWan(m.cost)} 万，需复核成本或走变更</span>`
+    :`<span style="color:var(--ok)">报价成本 ${fmtWan(lc)} 万 未超项目成本预算 ${fmtWan(m.cost)} 万</span>`);
+  if(m.est&&lq) red.push(lq>m.est?`<span style="color:#b25e0c">对外报价 ${fmtWan(lq)} 万 高于预估合同额 ${fmtWan(m.est)} 万，需确认客户预算口径</span>`
+    :`<span style="color:var(--sub)">对外报价 ${fmtWan(lq)} 万 ≤ 预估 ${fmtWan(m.est)} 万，价格空间 ${fmtWan(Math.round((m.est-lq)*10)/10)} 万</span>`);
+  if(m.won&&lq) red.push(Math.abs(m.won-lq)<0.01?`<span style="color:var(--ok)">中标合同额与最新报价一致（${fmtWan(m.won)} 万）</span>`
+    :`<span style="color:#b25e0c">中标合同额 ${fmtWan(m.won)} 万 与最新报价 ${fmtWan(lq)} 万不一致，请核对是否议价后未更新</span>`);
+  if(red.length)h+=`<div style="font-size:12.5px;display:flex;flex-direction:column;gap:4px;margin-bottom:10px">${red.map(t=>`<div>· ${t}</div>`).join('')}</div>`;
+  h+=`<div style="overflow-x:auto"><table><tr><th>版本</th><th>日期</th><th>状态</th><th>成本(万)</th><th>报价(万)</th><th>利润(万)</th><th>利润率</th><th>与上一版对比</th><th style="width:210px">操作</th></tr>`+
+  vs.map((q,i)=>{
     const cost=sumQtCost(q),quote=sumQtQuote(q),profit=quote-cost,margin=quote?Math.round(profit/quote*100):0;
+    const prev=vs[i+1];
+    let delta='—';
+    if(prev){const pc=sumQtCost(prev),pq=sumQtQuote(prev),pm=pq?Math.round((pq-pc)/pq*100):0;
+      const dp=Math.round((quote-pq)*10)/10, dm=margin-pm;
+      delta=`<span style="color:${dp<0?'var(--bad)':dp>0?'var(--ok)':'var(--sub)'}">报价 ${dp>0?'+':''}${dp}</span> · <span style="color:${dm<0?'var(--bad)':dm>0?'var(--ok)':'var(--sub)'}">利润率 ${dm>0?'+':''}${dm}pt</span>`}
+    const open=_qtOpen.has(q.id);
     return `<tr>
-      <td><b>${esc(q.name)}</b></td><td>${esc(q.date||'—')}</td><td>${cost.toFixed(2)}</td><td>${quote.toFixed(2)}</td>
-      <td>${profit.toFixed(2)}</td><td style="color:${margin>=30?'var(--ok)':margin>=15?'#b25e0c':'var(--bad)'}">${margin}%</td>
-      <td>${esc(q.status||'草稿')}</td>
+      <td><b style="cursor:pointer" onclick="qtToggle('${q.id}')">${open?'▾':'▸'} ${esc(q.name)}</b></td><td>${esc(q.date||'—')}</td>
+      <td><select onchange="qtSetStatus('${q.id}',this.value)" style="padding:3px 6px">${QT_STATUS.map(s=>`<option ${s===(q.status||'草稿')?'selected':''}>${s}</option>`).join('')}</select></td>
+      <td>${cost.toFixed(2)}</td><td>${quote.toFixed(2)}</td>
+      <td style="color:${profit>=0?'var(--ok)':'var(--bad)'}">${profit.toFixed(2)}</td>
+      <td style="color:${margin>=30?'var(--ok)':margin>=15?'#b25e0c':'var(--bad)'}">${margin}%</td>
+      <td style="font-size:12px">${delta}</td>
       <td><button class="btn sm ghost" onclick="openQuotationModal('${q.id}')">编辑</button>
         ${q.excelFile?`<a class="btn sm ghost" href="/api/files/download/${encodeURIComponent(q.excelFile.fileId)}" target="_blank">下载Excel</a>`:`<label class="btn sm ghost" style="cursor:pointer">上传Excel<input type="file" accept=".xlsx,.xls" style="display:none" onchange="uploadQuotationExcel(this,'${q.id}')"></label>`}
-        <button class="btn sm danger" onclick="delQuotation('${q.id}')">删除</button></td></tr>`
-  }).join('')+'</table></div>';
-  if(list.length){
-    const latest=list[0];
-    const cost=sumQtCost(latest),quote=sumQtQuote(latest),profit=quote-cost,margin=quote?Math.round(profit/quote*100):0;
+        <button class="btn sm danger" onclick="delQuotation('${q.id}')">删除</button></td></tr>`+
+      (open?(q.items||[]).map(it=>{const c=(parseFloat(it.cost)||0)*(parseFloat(it.qty)||1),qq=(parseFloat(it.quote)||0)*(parseFloat(it.qty)||1),r=qq?Math.round((qq-c)/qq*100):0;
+        return `<tr class="qt-line"><td colspan="4" style="color:var(--sub)">　${esc(it.name||'—')}${it.remark?` <small>${esc(it.remark)}</small>`:''}</td>
+        <td>${fmtWan(qq)} ×${esc(it.qty||1)}</td><td>${fmtWan(qq-c)}</td><td style="color:${r>=30?'var(--ok)':r>=15?'#b25e0c':'var(--bad)'}">${r}%</td><td colspan="2"></td></tr>`}).join(''):'')
+  }).join('')+'</table></div></div>';
+  if(vs.length){
+    const cost=lc,quote=lq,profit=lq-lc,margin=lq?Math.round((lq-lc)/lq*100):0;
     h+=`<div class="card"><h3>最新报价利润分析（${esc(latest.name)}）</h3>
       <div class="grid g4" style="font-size:13px">
         <div><span style="color:var(--sub)">成本合计</span><br><b style="font-size:20px">${cost.toFixed(2)}</b> 万</div>
@@ -1384,6 +1539,14 @@ function renderQuotations(){
 }
 function sumQtCost(q){return (q.items||[]).reduce((s,it)=>s+(parseFloat(it.cost)||0)*(parseFloat(it.qty)||1),0)}
 function sumQtQuote(q){return (q.items||[]).reduce((s,it)=>s+(parseFloat(it.quote)||0)*(parseFloat(it.qty)||1),0)}
+const QT_STATUS=['草稿','内部评审','已提交','中标价','作废'];
+const _qtOpen=new Set();
+function qtToggle(id){_qtOpen.has(id)?_qtOpen.delete(id):_qtOpen.add(id);renderQuotations()}
+function qtSetStatus(id,v){
+  const pid=document.getElementById('qtProj').value;const q=(store.quotations[pid]||[]).find(x=>x.id===id);if(!q)return;
+  q.status=v;const p=getProj(pid);if(p)addTl(p,'报价「'+q.name+'」状态→'+v);
+  persist();renderQuotations();toast('状态已更新')
+}
 let _qtItems=[];
 function openQuotationModal(id){
   const pid=document.getElementById('qtProj').value;
@@ -1440,31 +1603,61 @@ function delQuotation(id){if(!confirm('确定删除该报价？'))return;const p
 function renderCompintel(){
   const el=document.getElementById('ciBody');
   const sel=document.getElementById('ciProjFilter');
-  sel.innerHTML='<option value="">全部项目</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const cur=sel.value;
+  const opts='<option value="">全部项目</option>'+store.projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  if(sel.innerHTML!==opts)sel.innerHTML=opts;
+  if(cur&&store.projects.some(p=>p.id===cur))sel.value=cur;
   const kw=(document.getElementById('ciSearch').value||'').toLowerCase();
-  const pf=document.getElementById('ciProjFilter').value;
-  let list=store.compintel.slice();
+  const pf=sel.value;
+  let list=store.compintel.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
   if(pf)list=list.filter(x=>x.projectId===pf);
   if(kw)list=list.filter(x=>(x.competitor+' '+x.product+' '+x.strategy+' '+x.source).toLowerCase().includes(kw));
-  if(!list.length){el.innerHTML='<div class="empty">暂无竞争情报，点击右上角新增</div>';return}
-  el.innerHTML=list.map(ci=>{
-    const p=ci.projectId?getProj(ci.projectId):null;
+  const p=pf?getProj(pf):null;
+  /* 项目视角：我方报价 vs 对手报价 */
+  let head='';
+  if(p){
+    const qs=(store.quotations[p.id]||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+    const mine=qs.length?sumQtQuote(qs[0]):0;
+    const rows=list.filter(x=>x.price!==undefined&&x.price!=='');
+    head=`<div class="card"><h3>${esc(p.name)} · 报价对位</h3>
+      <div class="grid g4" style="font-size:13px">
+        <div><span style="color:var(--sub)">我方预估合同额</span><br><b>${fmtWan(amountsOf(p).est)||'—'}</b> 万</div>
+        <div><span style="color:var(--sub)">我方最新报价</span><br><b>${mine?fmtWan(mine):'未出报价'}</b> 万${qs[0]?`<br><small style="color:var(--sub)">${esc(qs[0].name)} · ${esc(qs[0].status||'草稿')}</small>`:''}</div>
+        <div><span style="color:var(--sub)">已掌握对手报价</span><br><b>${rows.length?rows.map(r=>fmtWan(r.price)).join(' / '):'—'}</b> 万</div>
+        <div><span style="color:var(--sub)">决策链覆盖</span><br><b>${chainCoverage(p.id).covered}/${KEY_ROLES.length}</b><br><small style="color:var(--sub)">${chainCoverage(p.id).miss.length?'缺：'+chainCoverage(p.id).miss.join('、'):'已覆盖'}</small></div>
+      </div>
+      ${mine&&rows.length?`<div class="hint" style="margin-top:10px">${rows.map(r=>{const d=Math.round((mine-r.price)/mine*1000)/10;
+        return `<b>${esc(r.competitor)}</b> ${d>0?'比我方低 '+Math.abs(d)+'%':'比我方高 '+Math.abs(d)+'%'}`}).join('；')}。
+        ${rows.some(r=>r.price>mine)?'我方价格不处于劣势，竞争重点应放在技术分与关系覆盖上。':'存在价格劣势，慎用降价，优先用 TCO/运维成本重构评标口径，并确认商务分权重。'}</div>`:''}
+    </div>`;
+  }else{
+    const byC={};store.compintel.forEach(x=>{const k=x.competitor||'未填';(byC[k]=byC[k]||[]).push(x)});
+    const names=Object.keys(byC);
+    head=`<div class="card"><h3>对手画像（共 ${names.length} 家）</h3>${names.length?'<div class="grid g4">'+names.map(n=>{
+      const arr=byC[n];const last=arr[0];
+      return `<div class="chain-cov" style="cursor:default"><div class="lb">${esc(n)}</div>
+        <div style="font-size:12px;color:var(--sub)">${arr.length} 条情报 · 最近 ${esc(last.date||'—')}</div>
+        <div style="font-size:12px;margin-top:4px">${last.price?'对手报价 <b>'+fmtWan(last.price)+'</b> 万':'价格未知'}</div></div>`}).join('')+'</div>':'<div class="empty">暂无情报</div>'}</div>`;
+  }
+  if(!list.length){el.innerHTML=head+'<div class="card"><div class="empty">暂无匹配的竞争情报，点击右上角新增</div></div>';return}
+  el.innerHTML=head+'<div class="card">'+list.map(ci=>{
+    const pr=ci.projectId?getProj(ci.projectId):null;
     return `<div class="kb-item"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <b>${esc(ci.competitor)}</b>${ci.product?`<span class="tag">${esc(ci.product)}</span>`:''}${p?`<span class="tag">${esc(p.name)}</span>`:''}
+      <b>${esc(ci.competitor)}</b>${ci.product?`<span class="tag">${esc(ci.product)}</span>`:''}${pr?`<span class="tag">${esc(pr.name)}</span>`:''}
       <div style="flex:1"></div>
       <span style="font-size:12px;color:var(--sub)">${esc(ci.date||'—')}</span>
       <button class="btn sm ghost" onclick="openCiModal('${ci.id}')">编辑</button>
       <button class="btn sm danger" onclick="delCompintel('${ci.id}')">删除</button></div>
       <div class="grid g2" style="margin-top:10px;font-size:12.5px">
-        ${ci.price!==undefined&&ci.price!==''?`<div><span style="color:var(--sub)">报价</span><br><b>${esc(ci.price)} 万</b></div>`:''}
+        ${ci.price!==undefined&&ci.price!==''?`<div><span style="color:var(--sub)">对手报价</span><br><b>${esc(ci.price)} 万</b>${pr&&pr.id&&ci.price?(()=>{const qs=store.quotations[pr.id]||[];const mine=qs.length?sumQtQuote(qs[0]):0;return mine?` <small style="color:var(--sub)">我方 ${fmtWan(mine)} 万</small>`:''})():''}</div>`:''}
         ${ci.source?`<div><span style="color:var(--sub)">来源</span><br>${esc(ci.source)}</div>`:''}
       </div>
       ${ci.strategy?`<div class="body"><b>市场策略</b><br>${esc(ci.strategy)}</div>`:''}
       ${ci.strengths||ci.weaknesses?`<div style="display:flex;gap:12px;margin-top:8px;font-size:12.5px">
-        ${ci.strengths?`<div style="flex:1;background:#e6f4ea;border-radius:8px;padding:10px"><b style="color:var(--ok)">优势</b><br>${esc(ci.strengths)}</div>`:''}
-        ${ci.weaknesses?`<div style="flex:1;background:#fde8ef;border-radius:8px;padding:10px"><b style="color:var(--bad)">劣势</b><br>${esc(ci.weaknesses)}</div>`:''}
+        ${ci.strengths?`<div style="flex:1;background:#e6f4ea;border-radius:8px;padding:10px"><b style="color:var(--bad)">对手优势</b><br>${esc(ci.strengths)}</div>`:''}
+        ${ci.weaknesses?`<div style="flex:1;background:#fde8ef;border-radius:8px;padding:10px"><b style="color:var(--ok)">对手弱点</b><br>${esc(ci.weaknesses)}</div>`:''}
       </div>`:''}
-    </div>`}).join('');
+    </div>`}).join('')+'</div>';
 }
 function openCiModal(id){
   const ci=id?store.compintel.find(x=>x.id===id):null;
@@ -1605,7 +1798,7 @@ function seed(){
     source:'',progressText:'',lostReason:'',created:today(),c139:c139||C(),tasks:[],timeline:[],bg:{},docs:[]},extra||{});
   store.projects=[
     mk('p1','省农信社核心系统灾备建设项目','青海省农村信用社联合社','招投标阶段','控单','王强','李晓峰',
-      [860,520,0,0],['2026-10','','2026-09-28'],
+      [860,520,0,520],['2026-10','','2026-09-28'],
       C({coach:true,is1W:true,consensus:[true,true,true],factors:[true,true,true,true,true,true,true,true,false],note:'科技部处处长期待我方方案，招标参数已体现双活要求'}),
       {source:'一期维保关系转入，客户立项批复已下达',progressText:'已发标，9/28 开标；技术参数对我方有利，重点防低价搅局与答疑澄清。',
        bg:{why:'核心系统无异地灾备，监管要求 2026 年底前达到 RPO≤15 分钟',chain:'科技部（决策把关）→ 分管副主任（决策者）→ 运营管理部（使用方）',rival:'A公司（同城灾备一期承建商）；B公司（低价策略）'},
@@ -1697,14 +1890,32 @@ function seed(){
     p4:[SK('何俊','信息化科负责人','园区管委会办公室','使用部门','medium','neutral','招商与能耗管理可视化','等其数字化规划初稿出来再判断真实预算与决策结构')],
     p5:[SK('徐明','分管副院长','院领导班子','决策者','high','oppose','与一期系统兼容、更换成本高','未建立直接关系，是本次输标主因之一，留作后续经营对象')]
   };
-  store.contracts={p3:{contractNo:'HT-2026-ZWYC-002',amount:796,signDate:'2026-08-16',endDate:'2027-10-15',paymentTerms:'3:6:1',status:'已签署',notes:'按招标文件付款条款，预留 10% 质保金一年',attachments:[]}};
-  store.quotations={p3:[
-    {id:uid(),name:'V1 初版报价',date:today(),status:'草稿',notes:'含软硬件、实施、三年维保',excelFile:null,
-     items:[{name:'云平台软件授权',qty:1,cost:120,quote:180,remark:'含一云多芯、算力调度'},
-            {name:'硬件服务器',qty:8,cost:240,quote:320,remark:'信创服务器'},
-            {name:'实施与集成',qty:1,cost:80,quote:120,remark:'90天交付'},
-            {name:'三年维保',qty:1,cost:60,quote:90,remark:'7×24'}]}
-  ]};
+  store.contracts={p3:{contractNo:'HT-2026-ZWYC-002',amount:796,signDate:'2026-08-16',endDate:addDays(today(),24),paymentTerms:'3:6:1',status:'执行中',
+    notes:'按招标文件付款条款，预留 10% 质保金一年',
+    payments:[
+      {id:uid(),name:'预付款',ratio:30,amount:238.8,due:'2026-08-30',paid:true,paidDate:'2026-08-28'},
+      {id:uid(),name:'到货款/验收款',ratio:60,amount:477.6,due:addDays(today(),-3),paid:false,paidDate:''},
+      {id:uid(),name:'质保金',ratio:10,amount:79.6,due:'2027-10-15',paid:false,paidDate:''}],
+    attachments:[]}};
+  store.quotations={
+    p1:[
+      {id:uid(),name:'V2 控标版',date:addDays(today(),-3),status:'已提交',notes:'按答疑澄清后口径调整，软件授权占比提高',excelFile:null,
+       items:[{name:'灾备双活软件授权',qty:1,cost:150,quote:260,remark:'含双活与异地复制'},
+              {name:'灾备硬件设备',qty:4,cost:65,quote:80,remark:'信创服务器'},
+              {name:'实施与集成',qty:1,cost:90,quote:140,remark:'90 天交付'},
+              {name:'三年维保',qty:1,cost:60,quote:90,remark:'7×24'}]},
+      {id:uid(),name:'V1 初版报价',date:addDays(today(),-20),status:'作废',notes:'首版内部测算价',excelFile:null,
+       items:[{name:'灾备双活软件授权',qty:1,cost:150,quote:230,remark:''},
+              {name:'灾备硬件设备',qty:4,cost:65,quote:75,remark:''},
+              {name:'实施与集成',qty:1,cost:90,quote:130,remark:''},
+              {name:'三年维保',qty:1,cost:60,quote:80,remark:''}]}],
+    p3:[
+      {id:uid(),name:'中标价',date:'2026-06-25',status:'中标价',notes:'与合同额一致，用于交付成本核算',excelFile:null,
+       items:[{name:'云平台软件授权',qty:1,cost:120,quote:240,remark:'含一云多芯、算力调度'},
+              {name:'硬件服务器',qty:8,cost:30,quote:40,remark:'信创服务器'},
+              {name:'实施与集成',qty:1,cost:80,quote:120,remark:'90天交付'},
+              {name:'三年维保',qty:1,cost:60,quote:116,remark:'7×24'}]}]
+  };
   store.compintel=[
     {id:uid(),competitor:'A公司',projectId:'p3',product:'政务云一期续建方案',price:920,source:'客户透露/公开中标公告',date:today(),
      strategy:'强调一期粘性与迁移成本，承诺免费平滑升级',strengths:'一期承建商，数据迁移风险低，客户关系深',weaknesses:'多云纳管能力弱，二期扩容报价高，一期利用率投诉未解决'},
