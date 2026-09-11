@@ -18,6 +18,7 @@ const path = require('node:path')
 const { HermesPool, hermesCookieCached, invalidateCookieCache } = require('./hermes.js')
 const { extractText } = require('./extract.js')
 const { createTask, getTask, findRunning, stats: taskStats } = require('./async-task.js')
+const auth = require('./auth.js')
 
 const PORT = Number(process.env.PORT || 8088)
 const HOST = process.env.BIND_HOST || '0.0.0.0'
@@ -812,6 +813,25 @@ async function handleHealth(req, res) {
 const server = http.createServer(async (req, res) => {
   const url = req.url || '/'
   try {
+    /* ---- 鉴权与 RBAC ---- */
+    if (url.startsWith('/api/')) {
+      const ap = url.split('?')[0]
+      if (ap === '/api/login' && req.method === 'POST') return void (await auth.handleLogin(req, res))
+      if (ap !== '/api/health') {
+        const user = auth.authenticate(req)
+        if (!user) return sendJson(res, 401, { error: '未登录' })
+        if (ap === '/api/logout') return void (auth.handleLogout(req, res))
+        if (ap === '/api/me') return void (auth.handleMe(req, res, user))
+        if (ap === '/api/users' || ap.startsWith('/api/users/')) {
+          if (user.role !== 'admin') return sendJson(res, 403, { error: '需要管理员权限' })
+          return void (await auth.handleUsers(req, res, user, ap))
+        }
+        if (ap === '/api/password' && req.method === 'POST') return void (await auth.handleChangePassword(req, res, user))
+        const az = auth.authorize(user, ap, req.method)
+        if (!az.ok) return sendJson(res, 403, { error: az.error })
+        req.__user = user
+      }
+    }
     if (url === '/api/chat' && req.method === 'POST') return void (await handleChat(req, res))
     if (url === '/api/qa/ask' && req.method === 'POST') return void (await handleQaAsk(req, res))
     if (url.startsWith('/api/chat/poll/') && req.method === 'GET') {
@@ -919,6 +939,9 @@ const server = http.createServer(async (req, res) => {
 server.keepAliveTimeout = 65000
 server.headersTimeout = 70000
 server.requestTimeout = 0   // SSE 长连接不设请求超时
+
+auth.init({ DATA_DIR, log })
+auth.ensureBootstrap()
 
 server.listen(PORT, HOST, () => {
   log(`售前工作台 BFF 已启动  http://${HOST}:${PORT}`)

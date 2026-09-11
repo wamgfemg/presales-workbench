@@ -124,6 +124,7 @@ function show(p){
   if(p==='quotations')renderQuotations();
   if(p==='compintel')renderCompintel();
   if(p==='requirements')renderRequirements();
+  if(p==='users'&&window.renderUsers)renderUsers();
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-p]');if(b)show(b.dataset.p)});
 function closeMask(id){document.getElementById(id).classList.remove('on')}
@@ -2546,10 +2547,12 @@ function renderSyncState(){
     :('服务器暂不可达（'+_lastErr+'），数据先存本机，恢复后自动补传');
 }
 
-/* ================= 启动 ================= */
-load();seed();renderDash();renderProjects();
-_markSynced();                       // 先把本机现状当作「已同步基线」，之后的差异才算改动
-pullState(true).then(function(){
-  setInterval(function(){if(!document.hidden)pullState(false)},SYNC_POLL_MS);
-  document.addEventListener('visibilitychange',function(){if(!document.hidden)pullState(false)});
-});
+/* ================= 启动（由 auth.js 登录成功后调用 bootApp） ================= */
+function bootApp(){
+  load();seed();renderDash();renderProjects();
+  _markSynced();
+  pullState(true).then(function(){
+    setInterval(function(){if(!document.hidden)pullState(false)},SYNC_POLL_MS);
+    document.addEventListener('visibilitychange',function(){if(!document.hidden)pullState(false)});
+  });
+}
