@@ -17,7 +17,9 @@ body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background
 .nav button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;color:#c8d0e8;padding:11px 12px;border-radius:9px;cursor:pointer;font-size:13.5px;margin-bottom:2px;text-align:left}
 .nav button:hover{background:rgba(255,255,255,.07)}
 .nav button.on{background:var(--grad);color:#fff;font-weight:600}
-.nav .ico{width:20px;text-align:center;font-size:15px}
+.nav .ico{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.nav .ico svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;opacity:.92}
+.nav button.on .ico svg{opacity:1;stroke-width:1.85}
 /* 侧边栏细窄深色滚动条 */
 .nav{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
 .nav::-webkit-scrollbar{width:8px;height:8px}
