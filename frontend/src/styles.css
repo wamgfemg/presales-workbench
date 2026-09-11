@@ -18,6 +18,12 @@ body{font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background
 .nav button:hover{background:rgba(255,255,255,.07)}
 .nav button.on{background:var(--grad);color:#fff;font-weight:600}
 .nav .ico{width:20px;text-align:center;font-size:15px}
+/* 侧边栏细窄深色滚动条 */
+.nav{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+.nav::-webkit-scrollbar{width:8px;height:8px}
+.nav::-webkit-scrollbar-track{background:transparent}
+.nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px}
+.nav::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26)}
 .side-foot{padding:14px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#8b95b8}
 .side-foot button{width:100%;margin-top:6px;background:rgba(255,255,255,.08);border:0;color:#c8d0e8;padding:7px;border-radius:7px;cursor:pointer;font-size:12px}
 .side-foot button:hover{background:rgba(255,255,255,.16)}
