@@ -629,13 +629,17 @@ async function handleHermesFileBrowse(req, res, sp) {
 
 async function handleHermesFileDownload(req, res, sp) {
   const url = process.env.HERMES_URL || 'http://127.0.0.1:9119'
-  const cookie = await hermesCookieCached()
   const filePath = sp ? sp.get('path') : ''
   if (!filePath) return sendJson(res, 400, { error: 'path 参数必填' })
   const apiUrl = `${url}/api/files/download?path=${encodeURIComponent(filePath)}`
-  const r = await fetchWithTimeout(apiUrl, { headers: { cookie } }, 300000)
+  let r = await fetchWithTimeout(apiUrl, { headers: { cookie: await hermesCookieCached() } }, 300000)
+  if (r.status === 401) {
+    // Hermes 会话 cookie 过期：作废缓存并用新 cookie 透明重试一次，
+    // 避免用户首次点击下载就收到 401（浏览器表现为“无法从网站上提取文件”）
+    invalidateCookieCache()
+    r = await fetchWithTimeout(apiUrl, { headers: { cookie: await hermesCookieCached() } }, 300000)
+  }
   if (!r.ok) {
-    if (r.status === 401) invalidateCookieCache()
     return sendJson(res, r.status, { error: `Hermes 文件下载失败 HTTP ${r.status}` })
   }
   const ct = r.headers.get('content-type') || 'application/octet-stream'
