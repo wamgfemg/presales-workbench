@@ -259,9 +259,25 @@
 
     <!-- ============ 合同管理 ============ -->
     <section class="page" id="p-contracts">
-      <div class="page-head"><div><h2>合同管理</h2><div class="desc">记录项目合同关键信息并归档合同附件</div></div>
-        <select id="ctProj" onchange="renderContracts()" style="width:260px"></select></div>
+      <div class="page-head"><div><h2>合同管理</h2><div class="desc">合同清单台账：项目「已中标」后自动进入，可补充行业/区域/核心业务等信息，并上传、下载合同附件</div></div>
+        <div style="font-size:13px;color:var(--sub)">共 <b id="ctCount" style="color:var(--ink);font-size:15px">0</b> 份合同</div></div>
+      <div class="card ct-filter-card">
+        <div class="ct-filter">
+          <label><span>合同编号</span><input id="ctF_no" placeholder="请输入" oninput="renderContracts()"></label>
+          <label><span>合同甲方</span><input id="ctF_party" placeholder="请输入" oninput="renderContracts()"></label>
+          <label><span>项目名称</span><input id="ctF_proj" placeholder="请输入" oninput="renderContracts()"></label>
+          <label><span>行业</span><input id="ctF_industry" list="dlIndustry" placeholder="全部" oninput="renderContracts()"></label>
+          <label><span>区域</span><input id="ctF_region" list="dlRegion" placeholder="全部" oninput="renderContracts()"></label>
+          <label><span>核心业务</span><input id="ctF_biz" list="dlBiz" placeholder="全部" oninput="renderContracts()"></label>
+          <label><span>核心业务产品</span><input id="ctF_product" list="dlProduct" placeholder="全部" oninput="renderContracts()"></label>
+          <div class="ct-fbtns"><button class="btn sm ghost" onclick="ctResetFilter()">重置</button></div>
+        </div>
+      </div>
       <div id="ctBody"></div>
+      <datalist id="dlIndustry"></datalist>
+      <datalist id="dlRegion"></datalist>
+      <datalist id="dlBiz"></datalist>
+      <datalist id="dlProduct"></datalist>
     </section>
 
     <!-- ============ 报价管理 ============ -->
@@ -422,17 +438,22 @@
 
 <!-- 合同信息编辑 -->
 <div class="mask" id="mContract"><div class="modal">
-  <h3><span>合同信息</span><button class="x" onclick="closeMask('mContract')">✕</button></h3>
+  <h3><span>编辑合同信息</span><button class="x" onclick="closeMask('mContract')">✕</button></h3>
   <input type="hidden" id="ctId">
+  <div class="hint" style="margin-bottom:12px">项目：<b id="ctProjName"></b> · 合同随项目自动生成，这里补充台账信息</div>
   <div class="grid g2">
     <label class="f"><span>合同编号</span><input id="ctNo" placeholder="如 HT-2026-001"></label>
-    <label class="f"><span>合同金额（万元）</span><input id="ctAmount" type="number" step="0.01"></label>
-    <label class="f"><span>签订日期</span><input id="ctSignDate" type="date"></label>
-    <label class="f"><span>交付日期</span><input id="ctEndDate" type="date"></label>
-    <label class="f"><span>付款条款</span><input id="ctPayment" placeholder="如 3:6:1"></label>
-    <label class="f"><span>合同状态</span><select id="ctStatus"><option>洽谈中</option><option>已签订</option><option>执行中</option><option>已验收</option><option>已回款</option></select></label>
+    <label class="f"><span>合同甲方</span><input id="ctParty" placeholder="合同甲方名称"></label>
+    <label class="f"><span>签订时间</span><input id="ctSignDate" type="date"></label>
+    <label class="f"><span>合同状态</span><select id="ctStatus"><option>洽谈中</option><option>已签署</option><option>执行中</option><option>已结清</option><option>已终止</option></select></label>
+    <label class="f"><span>合同总额（万元）</span><input id="ctTotal" type="number" step="0.01"></label>
+    <label class="f"><span>软件合同额（万元）</span><input id="ctSoftware" type="number" step="0.01"></label>
+    <label class="f"><span>行业</span><input id="ctIndustry" list="dlIndustry" placeholder="选择或输入"></label>
+    <label class="f"><span>区域</span><input id="ctRegion" list="dlRegion" placeholder="选择或输入"></label>
+    <label class="f"><span>核心业务</span><input id="ctBiz" list="dlBiz" placeholder="选择或输入"></label>
+    <label class="f"><span>核心业务产品</span><input id="ctProduct" list="dlProduct" placeholder="选择或输入"></label>
   </div>
-  <label class="f"><span>备注</span><textarea id="ctNotes" rows="3"></textarea></label>
+  <label class="f"><span>备注</span><textarea id="ctNotes" rows="2"></textarea></label>
   <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mContract')">取消</button>
   <button class="btn" style="margin-left:10px" onclick="saveContract()">保存</button></div>
 </div></div>

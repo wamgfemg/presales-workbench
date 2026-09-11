@@ -314,3 +314,22 @@ table.mtx td.zero{color:#c3c9d6;background:#fbfcfe;font-weight:400}
 table.mtx td.sum{background:#f8fafd;color:var(--sub);border-color:var(--line)}
 table.mtx td.on{outline:2px solid var(--brand);outline-offset:-2px}
 tr.qt-line td{background:#fbfcfe;font-size:12.5px;padding-top:6px;padding-bottom:6px}
+
+
+/* ===== 合同清单台账 ===== */
+.ct-filter-card{padding:14px 16px;margin-bottom:14px}
+.ct-filter{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end}
+.ct-filter label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--sub);min-width:118px}
+.ct-filter label input{padding:7px 9px;font-size:13px}
+.ct-fbtns{display:flex;align-items:flex-end}
+.ct-table{min-width:1180px}
+.ct-table td{font-size:12.5px}
+.ct-table td.num,.ct-table th.num{text-align:right;white-space:nowrap}
+.ct-table .ct-ph{color:#c3c9d6}
+.ct-att{white-space:nowrap}
+.ct-file{display:inline-block;max-width:118px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;font-size:12px;color:var(--brand);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:2px 7px;margin-right:2px}
+.ct-file:hover{background:#eef3fd}
+.ct-fx{border:0;background:none;color:var(--sub);cursor:pointer;font-size:12px;padding:0 2px;vertical-align:middle}
+.ct-fx:hover{color:var(--bad)}
+.ct-up{display:inline-block;font-size:12px;color:var(--brand);border:1px dashed #b9c7f5;border-radius:6px;padding:2px 8px;cursor:pointer}
+.ct-up:hover{background:#f0f4ff}

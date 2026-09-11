@@ -1748,152 +1748,124 @@ function renderChain(){
   el.innerHTML=h1+h2+h3;
 }
 
-/* ================= 合同管理 ================= */
-const CT_STATUS=['洽谈中','已签署','执行中','已结清','已终止'];
-function parseTerms(str){
-  const s=String(str||'');
-  let nums=[];
-  const pct=s.match(/\d+(\.\d+)?\s*%/g);   // 「预付30%、到货60%、质保10%」这类写法
-  if(pct&&pct.length<=6)nums=pct.map(x=>parseFloat(x));
-  else nums=s.split(/[:：\/\-、,，\s]+/).filter(x=>/^\d+(\.\d+)?$/.test(x)).map(Number);
-  if(!nums.length||nums.length>6)return [];
-  const sum=nums.reduce((a,b)=>a+b,0);if(!sum)return [];
-  const names=nums.length===2?['预付款','尾款']:nums.length===3?['预付款','到货款/验收款','质保金']:['预付款','到货款','验收款','质保金'];
-  return nums.map((n,i)=>({name:names[i]||('第'+(i+1)+'期'),ratio:Math.round(n/sum*1000)/10}))
+/* ================= 合同管理（清单台账） ================= */
+const CT_FILTERS={no:'',party:'',proj:'',industry:'',region:'',biz:'',product:''};
+function ctDict(){
+  const d=(store.ui&&store.ui.ctDict)||{};
+  return {
+    industry:(d.industry||['银行','证券','保险','信托','支付','农信/农商','政府','能源','交通','制造','医疗','教育','运营商','其他']),
+    region:(d.region||['华北','华东','华南','华中','西南','西北','东北']),
+    biz:(d.biz||['机房动环监控','数据中心基础设施','资产管理系统','智能运维','视频监控','门禁一卡通','能耗管理','综合布线','其他']),
+    product:(d.product||[])
+  }
 }
-function ensurePayments(c,amount){
-  const plan=parseTerms(c.paymentTerms);
-  if(!plan.length)return [];
-  c.payments=c.payments||[];
-  plan.forEach((p,i)=>{
-    const old=c.payments[i];
-    c.payments[i]=old?Object.assign({},old,{name:p.name,ratio:p.ratio,amount:amount?Math.round(amount*p.ratio)/100:null}):
-      {id:uid(),name:p.name,ratio:p.ratio,amount:amount?Math.round(amount*p.ratio)/100:null,due:'',paid:false,paidDate:''};
-  });
-  c.payments=c.payments.slice(0,plan.length);
-  return c.payments
+function ctQualifies(p){return p.stage==='已中标'||!!store.contracts[p.id]}
+function ctRow(p){
+  const c=store.contracts[p.id]||{},am=amountsOf(p);
+  const pick=(v,d)=>(v!==undefined&&v!=='')?v:(d||'');
+  return {pid:p.id,contractNo:c.contractNo||'',industry:c.industry||'',region:c.region||'',
+    partyA:c.partyA||p.customer||'',signDate:c.signDate||p.actualSignMonth||p.expectSignMonth||'',
+    projectName:p.name||'',total:pick(c.total,am.won),software:pick(c.software,am.sw),
+    coreBiz:c.coreBiz||'',coreBizProduct:c.coreBizProduct||'',status:c.status||'',notes:c.notes||'',
+    attachments:c.attachments||[]}
 }
-function ctSet(idx,field,val){
-  const pid=document.getElementById('ctProj').value;const c=store.contracts[pid];if(!c||!c.payments||!c.payments[idx])return;
-  c.payments[idx][field]=val;
-  if(field==='paid'&&val&&!c.payments[idx].paidDate)c.payments[idx].paidDate=today();
-  if(field==='paid'&&!val)c.payments[idx].paidDate='';
-  persist();renderContracts()
+function ctMoney(v){const n=parseFloat(v);return (isNaN(n)||n===0)?'—':fmtWan(n)+' 万'}
+function ctg(id){const e=document.getElementById(id);return e?e.value.trim():''}
+function ctRenderDatalists(){
+  const d=ctDict();
+  const fill=(id,arr)=>{const el=document.getElementById(id);if(el)el.innerHTML=arr.map(x=>'<option value="'+esc(x)+'">').join('')};
+  fill('dlIndustry',d.industry);fill('dlRegion',d.region);fill('dlBiz',d.biz);fill('dlProduct',d.product);
 }
-function ctRegen(){
-  const pid=document.getElementById('ctProj').value;const c=store.contracts[pid];if(!c)return;
-  c.payments=[];ensurePayments(c,parseFloat(c.amount)||0);persist();renderContracts();toast('已按付款条款重算回款计划')
+function ctApplyFilter(rows){
+  const f=CT_FILTERS,inc=(a,b)=>String(a||'').toLowerCase().includes(String(b).toLowerCase());
+  return rows.filter(r=>{
+    if(f.no&& !inc(r.contractNo,f.no))return false;
+    if(f.party&&!inc(r.partyA,f.party))return false;
+    if(f.proj &&!inc(r.projectName,f.proj))return false;
+    if(f.industry&&!inc(r.industry,f.industry))return false;
+    if(f.region&&!inc(r.region,f.region))return false;
+    if(f.biz&&!inc(r.coreBiz,f.biz))return false;
+    if(f.product&&!inc(r.coreBizProduct,f.product))return false;
+    return true})
 }
 function renderContracts(){
-  const el=document.getElementById('ctBody');
-  fillProjSelect('ctProj',currentProjectId);
-  const pid=document.getElementById('ctProj').value;
-  const p=getProj(pid);
-  if(!p){el.innerHTML='<div class="card"><div class="empty">暂无项目，请先在「项目管理」中创建</div></div>';return}
-  const c=store.contracts[pid]||{attachments:[]};
-  const amt=parseFloat(c.amount)||0;
-  if(amt&&c.paymentTerms&&!c.payments)ensurePayments(c,amt);
-  const pays=c.payments||[];
-  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
-    <div><h3 style="margin:0">${esc(p.name)} · 合同与回款</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)}</div></div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <select onchange="setContractStatus('${pid}',this.value)" style="padding:5px 8px">${CT_STATUS.map(s=>`<option ${s===(c.status||'洽谈中')?'selected':''}>${s}</option>`).join('')}</select>
-      <button class="btn" onclick="openContractModal()">编辑合同信息</button></div></div>
-    <div class="grid g4" style="font-size:13px">`;
-  h+=`<div><span style="color:var(--sub)">合同编号</span><br><b>${esc(c.contractNo||'—')}</b></div>`;
-  h+=`<div><span style="color:var(--sub)">合同金额</span><br><b>${amt?fmtWan(amt)+' 万':'—'}</b></div>`;
-  h+=`<div><span style="color:var(--sub)">签订日期</span><br><b>${esc(c.signDate||'—')}</b></div>`;
-  h+=`<div><span style="color:var(--sub)">交付/到期日期</span><br><b>${esc(c.endDate||'—')}</b></div>`;
-  h+=`<div><span style="color:var(--sub)">付款条款</span><br><b>${esc(c.paymentTerms||'—')}</b></div>`;
-  h+=`<div><span style="color:var(--sub)">状态</span><br><b>${esc(c.status||'洽谈中')}</b></div>`;
-  h+=`</div><div style="margin-top:10px"><span style="color:var(--sub)">备注</span><br>${esc(c.notes||'—')}</div>`;
-  /* 校验与到期提示 */
-  const tips=[];
-  const won=amountsOf(p).won;
-  if(amt&&won&&Math.abs(amt-won)>0.01)tips.push(`<span style="color:#b25e0c">合同额 ${fmtWan(amt)} 万 与项目中标合同额 ${fmtWan(won)} 万不一致，请确认以哪个为准</span>`);
-  if(amt&&!won)tips.push('<span style="color:var(--sub)">项目主档还没填中标合同额，建议补齐以便做报价/合同/回款三方对账</span>');
-  if(c.endDate){const d=new Date(c.endDate+'T00:00:00'),n=Math.ceil((d-new Date(today()+'T00:00:00'))/86400000);
-    tips.push(n<0?`<span style="color:var(--bad)">交付/到期日已逾期 ${-n} 天</span>`:n<=30?`<span style="color:#b25e0c">距交付/到期日 ${n} 天</span>`:`<span style="color:var(--sub)">距交付/到期日 ${n} 天</span>`)}
-  const overdue=pays.filter(x=>x.due&&!x.paid&&x.due<today());
-  if(overdue.length)tips.push(`<span style="color:var(--bad)">${overdue.length} 期回款已逾期：${overdue.map(x=>x.name+'（'+fmtWan(x.amount||0)+'万，'+x.due+'）').join('、')}</span>`);
-  if(tips.length)h+=`<div style="font-size:12.5px;margin-top:12px;display:flex;flex-direction:column;gap:4px">${tips.map(t=>`<div>· ${t}</div>`).join('')}</div>`;
-  h+=`</div>`;
-  /* 回款计划 */
-  const paidSum=pays.filter(x=>x.paid).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
-  h+=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <h3 style="margin:0">回款计划</h3>
-      <div style="font-size:12.5px;color:var(--sub)">已回款 <b style="color:var(--ok)">${fmtWan(Math.round(paidSum*10)/10)}</b> 万 · 未回款 <b>${amt?fmtWan(Math.round((amt-paidSum)*10)/10):'—'}</b> 万${amt?' · 回款率 '+Math.round(paidSum/amt*100)+'%':''}
-      ${pays.length?` <button class="btn sm ghost" onclick="ctRegen()">按条款重算</button>`:''}</div></div>`;
-  if(!pays.length){
-    h+=`<div class="empty">${amt&&c.paymentTerms?'无法从付款条款「'+esc(c.paymentTerms)+'」解析比例，请用 3:6:1 这类格式填写':'尚未填写付款条款，填写后自动生成回款计划'}</div></div>`;
-  }else{
-    h+=`<div style="overflow-x:auto"><table><tr><th>期次</th><th>比例</th><th>金额(万)</th><th>计划回款日</th><th>已回款</th><th>实际回款日</th></tr>`+
-    pays.map((x,i)=>`<tr${x.due&&!x.paid&&x.due<today()?' style="background:#fff5f5"':''}>
-      <td>${esc(x.name)}</td><td>${x.ratio}%</td><td>${x.amount!=null?fmtWan(x.amount):'—'}</td>
-      <td><input type="date" value="${esc(x.due||'')}" onchange="ctSet(${i},'due',this.value)" style="padding:3px 6px"></td>
-      <td><input type="checkbox" ${x.paid?'checked':''} onchange="ctSet(${i},'paid',this.checked)"></td>
-      <td>${x.paid?`<input type="date" value="${esc(x.paidDate||'')}" onchange="ctSet(${i},'paidDate',this.value)" style="padding:3px 6px">`:'<span style="color:var(--sub)">—</span>'}</td></tr>`).join('')+'</table></div>';}
-  h+=`<div class="hint" style="margin-top:8px">金额按期次比例自动分摊（合同额 × 比例）；改付款条款后点「按条款重算」，已标记的回款日期会保留在同位置。</div></div>`;
-  /* 附件 */
-  h+=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">合同附件</h3>
-    <label class="btn sm" style="cursor:pointer">⬆ 上传附件<input type="file" style="display:none" onchange="uploadContractFile(this)"></label></div>`;
-  const atts=c.attachments||[];
-  if(!atts.length){h+='<div class="empty">暂无附件（合同扫描件、中标通知书、验收单等）</div></div>';}
-  else h+=`<div style="overflow-x:auto"><table><tr><th>文件名</th><th>大小</th><th>上传日期</th><th style="width:140px">操作</th></tr>`+
-  atts.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td>${fmtSize(a.size)}</td><td>${esc(a.date||'—')}</td>
-    <td><a class="btn sm ghost" href="/api/files/download/${encodeURIComponent(a.fileId)}" target="_blank">下载</a>
-    <button class="btn sm danger" onclick="delContractFile('${a.fileId}')">删除</button></td></tr>`).join('')+'</table></div>';
-  el.innerHTML=h;
+  const el=document.getElementById('ctBody');if(!el)return;
+  ctRenderDatalists();
+  CT_FILTERS.no=ctg('ctF_no');CT_FILTERS.party=ctg('ctF_party');CT_FILTERS.proj=ctg('ctF_proj');
+  CT_FILTERS.industry=ctg('ctF_industry');CT_FILTERS.region=ctg('ctF_region');CT_FILTERS.biz=ctg('ctF_biz');CT_FILTERS.product=ctg('ctF_product');
+  let rows=(store.projects||[]).filter(ctQualifies).map(ctRow);
+  const total=rows.length;rows=ctApplyFilter(rows);
+  const cnt=document.getElementById('ctCount');if(cnt)cnt.textContent=total;
+  if(!total){el.innerHTML='<div class="card"><div class="empty">暂无合同。项目阶段变为「已中标」后会自动进入合同清单；也可到「项目管理」把已签约项目标记为已中标。</div></div>';return}
+  if(!rows.length){el.innerHTML='<div class="card"><div class="empty">没有符合筛选条件的合同　<button class="btn sm ghost" onclick="ctResetFilter()">重置筛选</button></div></div>';return}
+  const ph='<span class="ct-ph">—</span>';
+  el.innerHTML='<div class="card" style="padding:0;overflow:hidden"><div style="overflow-x:auto"><table class="ct-table">'+
+    '<tr><th>合同编号</th><th>行业</th><th>区域</th><th>合同甲方</th><th>签订时间</th><th>项目名称</th><th class="num">合同总额</th><th class="num">软件合同额</th><th>核心业务</th><th>核心业务产品</th><th>合同附件</th><th style="width:64px">操作</th></tr>'+
+    rows.map(r=>'<tr>'+
+      '<td>'+(esc(r.contractNo)||ph)+'</td>'+
+      '<td>'+(esc(r.industry)||ph)+'</td>'+
+      '<td>'+(esc(r.region)||ph)+'</td>'+
+      '<td>'+(esc(r.partyA)||'—')+'</td>'+
+      '<td>'+(esc(r.signDate)||'—')+'</td>'+
+      '<td><b>'+esc(r.projectName)+'</b></td>'+
+      '<td class="num">'+ctMoney(r.total)+'</td>'+
+      '<td class="num">'+ctMoney(r.software)+'</td>'+
+      '<td>'+(esc(r.coreBiz)||ph)+'</td>'+
+      '<td>'+(esc(r.coreBizProduct)||ph)+'</td>'+
+      '<td class="ct-att">'+ctAttCell(r)+'</td>'+
+      '<td><button class="btn sm ghost" onclick="openContractEdit(\''+r.pid+'\')">编辑</button></td>'+
+    '</tr>').join('')+
+    '</table></div></div>';
 }
-function setContractStatus(pid,v){
-  const c=store.contracts[pid];if(!c)return;c.status=v;
-  const p=getProj(pid);if(p)addTl(p,'合同状态→'+v);
-  persist();renderContracts();toast('状态已更新')
+function ctAttCell(r){
+  const files=(r.attachments||[]).map(a=>'<a class="ct-file" href="/api/files/download/'+encodeURIComponent(a.fileId)+'" target="_blank" title="'+esc(a.name)+'">📎'+esc(a.name.length>8?a.name.slice(0,7)+'…':a.name)+'</a><button class="ct-fx" title="删除附件" onclick="ctDelFile(\''+r.pid+'\',\''+a.fileId+'\')">✕</button>').join(' ');
+  const up='<label class="ct-up" title="上传合同附件">＋上传<input type="file" style="display:none" onchange="ctUpload(\''+r.pid+'\',this)"></label>';
+  return (files?files+'　':'')+up;
 }
-function openContractModal(){
-  const pid=document.getElementById('ctProj').value;
-  const c=store.contracts[pid]||{attachments:[]};
+function ctResetFilter(){['ctF_no','ctF_party','ctF_proj','ctF_industry','ctF_region','ctF_biz','ctF_product'].forEach(id=>{const e=document.getElementById(id);if(e)e.value=''});renderContracts()}
+function openContractEdit(pid){
+  const p=getProj(pid);if(!p)return;
+  const c=store.contracts[pid]||{},am=amountsOf(p),r=ctRow(p);
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=(v===undefined||v===null)?'':v};
   document.getElementById('ctId').value=pid;
-  document.getElementById('ctNo').value=c.contractNo||'';
-  document.getElementById('ctAmount').value=c.amount||'';
-  document.getElementById('ctSignDate').value=c.signDate||'';
-  document.getElementById('ctEndDate').value=c.endDate||'';
-  document.getElementById('ctPayment').value=c.paymentTerms||'';
+  document.getElementById('ctProjName').textContent=p.name;
+  set('ctNo',c.contractNo);set('ctParty',r.partyA);set('ctSignDate',c.signDate);
+  set('ctTotal',(c.total!==undefined&&c.total!=='')?c.total:(am.won||''));
+  set('ctSoftware',(c.software!==undefined&&c.software!=='')?c.software:(am.sw||''));
+  set('ctIndustry',c.industry);set('ctRegion',c.region);set('ctBiz',c.coreBiz);set('ctProduct',c.coreBizProduct);
   document.getElementById('ctStatus').value=c.status||'洽谈中';
-  document.getElementById('ctNotes').value=c.notes||'';
+  set('ctNotes',c.notes);
   openMask('mContract');
 }
 function saveContract(){
-  const pid=document.getElementById('ctProj').value;if(!pid)return;
-  store.contracts[pid]={
-    contractNo:document.getElementById('ctNo').value.trim(),
-    amount:document.getElementById('ctAmount').value,
-    signDate:document.getElementById('ctSignDate').value,
-    endDate:document.getElementById('ctEndDate').value,
-    paymentTerms:document.getElementById('ctPayment').value.trim(),
-    status:document.getElementById('ctStatus').value,
-    notes:document.getElementById('ctNotes').value.trim(),
-    attachments:(store.contracts[pid]||{}).attachments||[]
-  };
+  const pid=document.getElementById('ctId').value;if(!pid)return;
+  const prev=store.contracts[pid]||{};
+  const g=id=>{const e=document.getElementById(id);return e?e.value.trim():''};
+  store.contracts[pid]={contractNo:g('ctNo'),partyA:g('ctParty'),signDate:g('ctSignDate'),
+    total:g('ctTotal'),software:g('ctSoftware'),industry:g('ctIndustry'),region:g('ctRegion'),
+    coreBiz:g('ctBiz'),coreBizProduct:g('ctProduct'),status:g('ctStatus'),notes:g('ctNotes'),
+    attachments:prev.attachments||[]};
+  const map={industry:'ctIndustry',region:'ctRegion',biz:'ctBiz',product:'ctProduct'};
+  Object.keys(map).forEach(k=>{const v=g(map[k]);if(v){store.ui=store.ui||{};const d=store.ui.ctDict=store.ui.ctDict||{};const arr=d[k]=d[k]||ctDict()[k]||[];if(arr.indexOf(v)<0)arr.push(v)}});
   persist();closeMask('mContract');renderContracts();toast('已保存');
 }
-async function uploadContractFile(inp){
-  const pid=document.getElementById('ctProj').value;if(!pid||!inp.files[0])return;
+async function ctUpload(pid,inp){
+  if(!pid||!inp.files||!inp.files[0])return;
   const file=inp.files[0];
   try{
     const r=await fetch('/api/files/upload',{method:'POST',headers:{'x-filename':encodeURIComponent(file.name)},body:file});
-    const d=await r.json();if(!d.ok)throw new Error(d.error);
-    store.contracts[pid]=store.contracts[pid]||{attachments:[]};
+    const d=await r.json();if(!d.ok)throw new Error(d.error||'上传失败');
+    store.contracts[pid]=store.contracts[pid]||{};
+    store.contracts[pid].attachments=store.contracts[pid].attachments||[];
     store.contracts[pid].attachments.push({fileId:d.fileId,name:d.name,size:d.size,date:today()});
-    persist();renderContracts();toast('上传成功');
+    persist();renderContracts();toast('附件已上传');
   }catch(e){toast('上传失败：'+e.message)}
   inp.value='';
 }
-async function delContractFile(fileId){
+async function ctDelFile(pid,fileId){
   if(!confirm('确定删除该附件？'))return;
-  const pid=document.getElementById('ctProj').value;
   try{await fetch('/api/files/'+encodeURIComponent(fileId),{method:'DELETE'})}catch(_){}
-  store.contracts[pid].attachments=(store.contracts[pid].attachments||[]).filter(a=>a.fileId!==fileId);
+  const c=store.contracts[pid];if(c)c.attachments=(c.attachments||[]).filter(a=>a.fileId!==fileId);
   persist();renderContracts();toast('已删除');
 }
 
@@ -2196,17 +2168,16 @@ function renderDtStk(p){
     <button class="btn ghost" onclick="chainPid='${p.id}';show('chain')">查看决策链视图 →</button></div></div>`;
 }
 function renderDtContract(p){
-  const c=store.contracts[p.id]||{attachments:[]};
+  const c=store.contracts[p.id]||{},r=ctRow(p);
+  const cell=(lb,v)=>`<div><span style="color:var(--sub)">${lb}</span><br><b>${v||'—'}</b></div>`;
   return `<div class="card"><h3>合同信息</h3>
     <div class="grid g4" style="font-size:13px">
-      <div><span style="color:var(--sub)">合同编号</span><br><b>${esc(c.contractNo||'—')}</b></div>
-      <div><span style="color:var(--sub)">合同金额</span><br><b>${c.amount!==undefined&&c.amount!==''?esc(c.amount)+' 万':'—'}</b></div>
-      <div><span style="color:var(--sub)">签订日期</span><br><b>${esc(c.signDate||'—')}</b></div>
-      <div><span style="color:var(--sub)">状态</span><br><b>${esc(c.status||'—')}</b></div>
+      ${cell('合同编号',esc(r.contractNo))}${cell('合同甲方',esc(r.partyA))}${cell('签订时间',esc(r.signDate))}${cell('合同总额',ctMoney(r.total))}
+      ${cell('软件合同额',ctMoney(r.software))}${cell('行业',esc(r.industry))}${cell('区域',esc(r.region))}${cell('状态',esc(r.status))}
+      ${cell('核心业务',esc(r.coreBiz))}${cell('核心业务产品',esc(r.coreBizProduct))}
     </div>
-    <div style="margin-top:10px"><span style="color:var(--sub)">付款条款</span><br>${esc(c.paymentTerms||'—')}</div>
-    <div style="margin-top:10px"><span style="color:var(--sub)">备注</span><br>${esc(c.notes||'—')}</div>
-    ${(c.attachments||[]).length?`<div style="margin-top:12px"><b>合同附件</b><br>${c.attachments.map(a=>`<a href="/api/files/download/${encodeURIComponent(a.fileId)}" target="_blank">${esc(a.name)}</a>`).join('、')}</div>`:''}
+    ${r.notes?`<div style="margin-top:10px"><span style="color:var(--sub)">备注</span><br>${esc(r.notes)}</div>`:''}
+    ${(c.attachments||[]).length?`<div style="margin-top:12px"><b>合同附件</b><br>${c.attachments.map(a=>`<a href="/api/files/download/${encodeURIComponent(a.fileId)}" target="_blank">📎 ${esc(a.name)}</a>`).join('、')}</div>`:''}
     <div style="margin-top:12px"><button class="btn" onclick="show('contracts')">前往合同管理 →</button></div></div>`;
 }
 
