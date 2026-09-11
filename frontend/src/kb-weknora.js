@@ -80,7 +80,7 @@ async function loadWeKnoraKb(force) {
       const q = '?kb=' + encodeURIComponent(pick)
       const [baseRes, listRes] = await Promise.all([
         fetch('/api/weknora/knowledge-base' + q),
-        fetch('/api/weknora/knowledge?page=1&page_size=200' + q)
+        fetch('/api/weknora/knowledge?page=1&page_size=200&kb=' + encodeURIComponent(pick))
       ])
       const baseData = await baseRes.json()
       const listData = await listRes.json()
