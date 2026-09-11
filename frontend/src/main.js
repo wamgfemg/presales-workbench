@@ -1759,15 +1759,25 @@ function ctDict(){
     product:(d.product||[])
   }
 }
-function ctQualifies(p){return p.stage==='已中标'||!!store.contracts[p.id]}
-function ctRow(p){
-  const c=store.contracts[p.id]||{},am=amountsOf(p);
+function ctRow(pid,p){
+  const c=store.contracts[pid]||{};
+  const am=p?amountsOf(p):{};
   const pick=(v,d)=>(v!==undefined&&v!=='')?v:(d||'');
-  return {pid:p.id,contractNo:c.contractNo||'',industry:c.industry||'',region:c.region||'',
-    partyA:c.partyA||p.customer||'',signDate:c.signDate||p.actualSignMonth||p.expectSignMonth||'',
-    projectName:p.name||'',total:pick(c.total,am.won),software:pick(c.software,am.sw),
+  return {pid,standalone:!p,
+    contractNo:c.contractNo||'',industry:c.industry||'',region:c.region||'',
+    partyA:c.partyA||(p?p.customer:'')||'',
+    signDate:c.signDate||(p?(p.actualSignMonth||p.expectSignMonth):'')||'',
+    projectName:(p?p.name:'')||c.projectName||'',
+    total:pick(c.total,am.won),software:pick(c.software,am.sw),
     coreBiz:c.coreBiz||'',coreBizProduct:c.coreBizProduct||'',status:c.status||'',notes:c.notes||'',
     attachments:c.attachments||[]}
+}
+function ctBuildRows(){
+  const byId={};(store.projects||[]).forEach(p=>byId[p.id]=p);
+  const rows=[];
+  (store.projects||[]).forEach(p=>{if(p.stage==='已中标'||store.contracts[p.id])rows.push(ctRow(p.id,p))});
+  Object.keys(store.contracts).forEach(pid=>{if(!byId[pid])rows.push(ctRow(pid,null))});
+  return rows
 }
 function ctMoney(v){const n=parseFloat(v);return (isNaN(n)||n===0)?'—':fmtWan(n)+' 万'}
 function ctg(id){const e=document.getElementById(id);return e?e.value.trim():''}
@@ -1793,27 +1803,26 @@ function renderContracts(){
   ctRenderDatalists();
   CT_FILTERS.no=ctg('ctF_no');CT_FILTERS.party=ctg('ctF_party');CT_FILTERS.proj=ctg('ctF_proj');
   CT_FILTERS.industry=ctg('ctF_industry');CT_FILTERS.region=ctg('ctF_region');CT_FILTERS.biz=ctg('ctF_biz');CT_FILTERS.product=ctg('ctF_product');
-  let rows=(store.projects||[]).filter(ctQualifies).map(ctRow);
-  const total=rows.length;rows=ctApplyFilter(rows);
+  const all=ctBuildRows();const total=all.length;const rows=ctApplyFilter(all);
   const cnt=document.getElementById('ctCount');if(cnt)cnt.textContent=total;
-  if(!total){el.innerHTML='<div class="card"><div class="empty">暂无合同。项目阶段变为「已中标」后会自动进入合同清单；也可到「项目管理」把已签约项目标记为已中标。</div></div>';return}
+  if(!total){el.innerHTML='<div class="card"><div class="empty">暂无合同。项目「已中标」会自动进入清单，或点右上角「＋ 新增合同」手工添加（可关联任意项目，或作为独立合同）。<div style="margin-top:12px"><button class="btn" onclick="openContractNew()">＋ 新增合同</button></div></div></div>';return}
   if(!rows.length){el.innerHTML='<div class="card"><div class="empty">没有符合筛选条件的合同　<button class="btn sm ghost" onclick="ctResetFilter()">重置筛选</button></div></div>';return}
   const ph='<span class="ct-ph">—</span>';
   el.innerHTML='<div class="card" style="padding:0;overflow:hidden"><div style="overflow-x:auto"><table class="ct-table">'+
-    '<tr><th>合同编号</th><th>行业</th><th>区域</th><th>合同甲方</th><th>签订时间</th><th>项目名称</th><th class="num">合同总额</th><th class="num">软件合同额</th><th>核心业务</th><th>核心业务产品</th><th>合同附件</th><th style="width:64px">操作</th></tr>'+
+    '<tr><th>合同编号</th><th>行业</th><th>区域</th><th>合同甲方</th><th>签订时间</th><th>项目名称</th><th class="num">合同总额</th><th class="num">软件合同额</th><th>核心业务</th><th>核心业务产品</th><th>合同附件</th><th style="width:104px">操作</th></tr>'+
     rows.map(r=>'<tr>'+
       '<td>'+(esc(r.contractNo)||ph)+'</td>'+
       '<td>'+(esc(r.industry)||ph)+'</td>'+
       '<td>'+(esc(r.region)||ph)+'</td>'+
       '<td>'+(esc(r.partyA)||'—')+'</td>'+
       '<td>'+(esc(r.signDate)||'—')+'</td>'+
-      '<td><b>'+esc(r.projectName)+'</b></td>'+
+      '<td><b>'+esc(r.projectName)+'</b>'+(r.standalone?' <span class="ct-tag">独立</span>':'')+'</td>'+
       '<td class="num">'+ctMoney(r.total)+'</td>'+
       '<td class="num">'+ctMoney(r.software)+'</td>'+
       '<td>'+(esc(r.coreBiz)||ph)+'</td>'+
       '<td>'+(esc(r.coreBizProduct)||ph)+'</td>'+
       '<td class="ct-att">'+ctAttCell(r)+'</td>'+
-      '<td><button class="btn sm ghost" onclick="openContractEdit(\''+r.pid+'\')">编辑</button></td>'+
+      '<td><button class="btn sm ghost" onclick="openContractEdit(\''+r.pid+'\')">编辑</button>'+(r.standalone?' <button class="btn sm ghost" onclick="deleteContract(\''+r.pid+'\')">删除</button>':'')+'</td>'+
     '</tr>').join('')+
     '</table></div></div>';
 }
@@ -1823,31 +1832,80 @@ function ctAttCell(r){
   return (files?files+'　':'')+up;
 }
 function ctResetFilter(){['ctF_no','ctF_party','ctF_proj','ctF_industry','ctF_region','ctF_biz','ctF_product'].forEach(id=>{const e=document.getElementById(id);if(e)e.value=''});renderContracts()}
+function ctFillProjPick(sel){
+  const e=document.getElementById('ctProjPick');if(!e)return;
+  let html='<option value="__new__">— 独立合同（手动填写项目名称）—</option>';
+  (store.projects||[]).forEach(p=>{html+='<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>'});
+  e.innerHTML=html;
+  const isProj=(store.projects||[]).some(p=>p.id===sel);
+  e.value=isProj?sel:'__new__';
+}
+function onCtProjPick(){
+  const v=document.getElementById('ctProjPick').value;
+  const wrap=document.getElementById('ctProjNameWrap');
+  if(v==='__new__'){if(wrap)wrap.style.display='';}
+  else{
+    if(wrap)wrap.style.display='none';
+    const p=getProj(v);if(!p)return;const am=amountsOf(p);const c=store.contracts[p.id]||{};
+    const setIfEmpty=(id,val)=>{const e=document.getElementById(id);if(e&&!e.value)e.value=(val==null?'':val)};
+    setIfEmpty('ctParty',c.partyA||p.customer);
+    setIfEmpty('ctTotal',(c.total!==undefined&&c.total!=='')?c.total:am.won);
+    setIfEmpty('ctSoftware',(c.software!==undefined&&c.software!=='')?c.software:am.sw);
+  }
+}
+function openContractNew(){
+  document.getElementById('ctId').value='';
+  ctFillProjPick('__new__');
+  ['ctNo','ctParty','ctSignDate','ctTotal','ctSoftware','ctIndustry','ctRegion','ctBiz','ctProduct','ctNotes','ctProjNameInput'].forEach(id=>{const e=document.getElementById(id);if(e)e.value=''});
+  document.getElementById('ctStatus').value='洽谈中';
+  onCtProjPick();
+  openMask('mContract');
+}
 function openContractEdit(pid){
-  const p=getProj(pid);if(!p)return;
-  const c=store.contracts[pid]||{},am=amountsOf(p),r=ctRow(p);
-  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=(v===undefined||v===null)?'':v};
+  const p=getProj(pid);const c=store.contracts[pid]||{};const r=ctRow(pid,p);
   document.getElementById('ctId').value=pid;
-  document.getElementById('ctProjName').textContent=p.name;
+  ctFillProjPick(p?pid:'__new__');
+  const wrap=document.getElementById('ctProjNameWrap');const ni=document.getElementById('ctProjNameInput');
+  if(p){if(wrap)wrap.style.display='none';}else{if(wrap)wrap.style.display='';if(ni)ni.value=c.projectName||'';}
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=(v==null?'':v)};
   set('ctNo',c.contractNo);set('ctParty',r.partyA);set('ctSignDate',c.signDate);
-  set('ctTotal',(c.total!==undefined&&c.total!=='')?c.total:(am.won||''));
-  set('ctSoftware',(c.software!==undefined&&c.software!=='')?c.software:(am.sw||''));
+  set('ctTotal',(c.total!==undefined&&c.total!=='')?c.total:(p?(amountsOf(p).won||''):''));
+  set('ctSoftware',(c.software!==undefined&&c.software!=='')?c.software:(p?(amountsOf(p).sw||''):''));
   set('ctIndustry',c.industry);set('ctRegion',c.region);set('ctBiz',c.coreBiz);set('ctProduct',c.coreBizProduct);
   document.getElementById('ctStatus').value=c.status||'洽谈中';
   set('ctNotes',c.notes);
   openMask('mContract');
 }
 function saveContract(){
-  const pid=document.getElementById('ctId').value;if(!pid)return;
-  const prev=store.contracts[pid]||{};
+  const pick=document.getElementById('ctProjPick').value;
+  const existingId=document.getElementById('ctId').value;
   const g=id=>{const e=document.getElementById(id);return e?e.value.trim():''};
-  store.contracts[pid]={contractNo:g('ctNo'),partyA:g('ctParty'),signDate:g('ctSignDate'),
+  let pid,standalone=false,projectName='';
+  if(pick==='__new__'){
+    projectName=g('ctProjNameInput');
+    if(!projectName){toast('请填写项目名称');return}
+    standalone=true;
+    const isProj=(store.projects||[]).some(p=>p.id===existingId);
+    pid=(existingId&&!isProj)?existingId:('m'+Date.now().toString(36)+Math.random().toString(36).slice(2,6));
+  }else{
+    pid=pick;const p=getProj(pid);projectName=p?p.name:'';
+  }
+  const prev=store.contracts[pid]||{};
+  const rec={contractNo:g('ctNo'),partyA:g('ctParty'),signDate:g('ctSignDate'),
     total:g('ctTotal'),software:g('ctSoftware'),industry:g('ctIndustry'),region:g('ctRegion'),
     coreBiz:g('ctBiz'),coreBizProduct:g('ctProduct'),status:g('ctStatus'),notes:g('ctNotes'),
     attachments:prev.attachments||[]};
+  if(standalone)rec.projectName=projectName;
+  store.contracts[pid]=rec;
   const map={industry:'ctIndustry',region:'ctRegion',biz:'ctBiz',product:'ctProduct'};
   Object.keys(map).forEach(k=>{const v=g(map[k]);if(v){store.ui=store.ui||{};const d=store.ui.ctDict=store.ui.ctDict||{};const arr=d[k]=d[k]||ctDict()[k]||[];if(arr.indexOf(v)<0)arr.push(v)}});
   persist();closeMask('mContract');renderContracts();toast('已保存');
+}
+function deleteContract(pid){
+  if(!store.contracts[pid])return;
+  if(!confirm('确定删除该合同记录？（不影响项目本身）'))return;
+  delete store.contracts[pid];
+  persist();renderContracts();toast('已删除');
 }
 async function ctUpload(pid,inp){
   if(!pid||!inp.files||!inp.files[0])return;
@@ -2168,7 +2226,7 @@ function renderDtStk(p){
     <button class="btn ghost" onclick="chainPid='${p.id}';show('chain')">查看决策链视图 →</button></div></div>`;
 }
 function renderDtContract(p){
-  const c=store.contracts[p.id]||{},r=ctRow(p);
+  const c=store.contracts[p.id]||{},r=ctRow(p.id,p);
   const cell=(lb,v)=>`<div><span style="color:var(--sub)">${lb}</span><br><b>${v||'—'}</b></div>`;
   return `<div class="card"><h3>合同信息</h3>
     <div class="grid g4" style="font-size:13px">

@@ -260,7 +260,7 @@
     <!-- ============ 合同管理 ============ -->
     <section class="page" id="p-contracts">
       <div class="page-head"><div><h2>合同管理</h2><div class="desc">合同清单台账：项目「已中标」后自动进入，可补充行业/区域/核心业务等信息，并上传、下载合同附件</div></div>
-        <div style="font-size:13px;color:var(--sub)">共 <b id="ctCount" style="color:var(--ink);font-size:15px">0</b> 份合同</div></div>
+        <div style="display:flex;align-items:center;gap:12px"><span style="font-size:13px;color:var(--sub)">共 <b id="ctCount" style="color:var(--ink);font-size:15px">0</b> 份合同</span><button class="btn sm" onclick="openContractNew()">＋ 新增合同</button></div></div>
       <div class="card ct-filter-card">
         <div class="ct-filter">
           <label><span>合同编号</span><input id="ctF_no" placeholder="请输入" oninput="renderContracts()"></label>
@@ -440,7 +440,10 @@
 <div class="mask" id="mContract"><div class="modal">
   <h3><span>编辑合同信息</span><button class="x" onclick="closeMask('mContract')">✕</button></h3>
   <input type="hidden" id="ctId">
-  <div class="hint" style="margin-bottom:12px">项目：<b id="ctProjName"></b> · 合同随项目自动生成，这里补充台账信息</div>
+  <div class="grid g2" style="margin-bottom:6px">
+    <label class="f"><span>关联项目</span><select id="ctProjPick" onchange="onCtProjPick()"></select></label>
+    <label class="f" id="ctProjNameWrap" style="display:none"><span>项目名称</span><input id="ctProjNameInput" placeholder="手动填写项目名称"></label>
+  </div>
   <div class="grid g2">
     <label class="f"><span>合同编号</span><input id="ctNo" placeholder="如 HT-2026-001"></label>
     <label class="f"><span>合同甲方</span><input id="ctParty" placeholder="合同甲方名称"></label>
