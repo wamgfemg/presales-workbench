@@ -1343,7 +1343,7 @@ async function qaSend(){
   const st=document.getElementById('qaStatus');qaRender();
   const key='qa:'+qaScope();
   try{
-    const r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key,text:qaBuildPrompt(q)})});
+    const r=await fetch('/api/qa/ask',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key,text:qaBuildPrompt(q)})});
     if(!r.ok||!r.body){const j=await r.json().catch(()=>({}));throw new Error(j.error||('HTTP '+r.status))}
     const reader=r.body.getReader();const dec=new TextDecoder('utf-8');let buf='',finalText='',err=null
     while(true){

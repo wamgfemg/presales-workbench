@@ -219,6 +219,80 @@ async function handleChat(req, res) {
   }, 500)
 }
 
+/* ---------------- 智能问答：OpenRouter 直连（流式，SSE 与 /api/chat 同格式） ---------------- */
+async function handleQaAsk(req, res) {
+  let body
+  try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { error: e.message }) }
+  const text = String(body.text || '').trim()
+  if (!text) return sendJson(res, 400, { error: 'text 不能为空' })
+  if (!OPENROUTER_KEY) return sendJson(res, 503, { error: '未配置 OPENROUTER_API_KEY，无法调用大模型' })
+  const model = String(body.model || OPENROUTER_MODEL)
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache, no-transform',
+    'connection': 'keep-alive',
+    'x-accel-buffering': 'no',
+  })
+  res.write(': open\n\n')
+  let closed = false
+  req.on('close', () => { closed = true })
+  const send = (obj) => { if (closed) return; try { res.write(`data: ${JSON.stringify(obj)}\n\n`) } catch (_) { closed = true } }
+  const controller = new AbortController()
+  const to = setTimeout(() => { try { controller.abort() } catch (_) {} }, 120000)
+  try {
+    send({ type: 'status', text: '正在思考…' })
+    const r = await fetch(OPENROUTER_URL + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'authorization': 'Bearer ' + OPENROUTER_KEY,
+        'content-type': 'application/json',
+        'http-referer': 'http://49.233.179.30:8088/',
+        'x-title': '售前工作台-智能问答',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: '你是售前团队的作战参谋。用中文回答，先给结论再给依据，涉及项目要点名项目，建议落到“谁·做什么·什么时候”，简洁可执行，控制在 400 字内，可用短列表。只依据用户提供的数据回答，数据里没有的明确说“系统里还没有这项数据”，不要编造。' },
+          { role: 'user', content: text },
+        ],
+        stream: true,
+        max_tokens: 1200,
+        temperature: 0.4,
+      }),
+      signal: controller.signal,
+    })
+    if (!r.ok || !r.body) {
+      const t = await r.text().catch(() => '')
+      send({ type: 'error', message: 'OpenRouter HTTP ' + r.status + (t ? ('：' + t.slice(0, 200)) : '') })
+      return res.end()
+    }
+    const reader = r.body.getReader(); const dec = new TextDecoder('utf-8')
+    let buf = '', full = '', usage = null
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break
+      buf += dec.decode(value, { stream: true })
+      const lines = buf.split('\n'); buf = lines.pop()
+      for (const line of lines) {
+        const s = line.trim()
+        if (!s.startsWith('data:')) continue
+        const payload = s.slice(5).trim()
+        if (payload === '[DONE]') continue
+        let j; try { j = JSON.parse(payload) } catch (_) { continue }
+        if (j.usage) usage = j.usage
+        const d = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content
+        if (d) { full += d; send({ type: 'delta', text: d }) }
+      }
+    }
+    send({ type: 'done', text: full, model, usage: usage ? { input: usage.prompt_tokens, output: usage.completion_tokens } : null })
+  } catch (e) {
+    send({ type: 'error', message: '调用失败：' + String((e && e.message) || e) })
+  } finally {
+    clearTimeout(to)
+    if (!closed) { try { res.end() } catch (_) {} }
+  }
+}
+
 /* ---------------- 轮询任务状态（SSE 断线后的兜底通道） ---------------- */
 async function handlePoll(req, res, taskId) {
   const task = getTask(taskId)
@@ -341,6 +415,10 @@ const WEKNORA_URL = process.env.WEKNORA_URL || 'http://127.0.0.1:8080'
 const WEKNORA_API_KEY = process.env.WEKNORA_API_KEY || ''
 const WEKNORA_KB_ID = process.env.WEKNORA_KB_ID || ''
 const WEKNORA_ENABLED = !!(WEKNORA_API_KEY && WEKNORA_KB_ID)
+const OPENROUTER_URL = (process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '')
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || ''
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'deepseek/deepseek-chat'
+
 
 let _kbAllow = { at: 0, set: null }
 async function kbAllowed() {
@@ -735,6 +813,7 @@ const server = http.createServer(async (req, res) => {
   const url = req.url || '/'
   try {
     if (url === '/api/chat' && req.method === 'POST') return void (await handleChat(req, res))
+    if (url === '/api/qa/ask' && req.method === 'POST') return void (await handleQaAsk(req, res))
     if (url.startsWith('/api/chat/poll/') && req.method === 'GET') {
       return void (await handlePoll(req, res, decodeURIComponent(url.slice('/api/chat/poll/'.length).split('?')[0])))
     }
