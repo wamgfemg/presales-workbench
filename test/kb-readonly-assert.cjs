@@ -82,7 +82,7 @@ const H = boot(document, localStorage, fetchStub, {}).api
   T('单库视图不再重复显示所属库标签', !one.includes('background:#eef3fd;color:#1c5ed8">资质'))
   T('单库下载链接 kb 参数正确', one.includes('kb=kb-qua'))
   T('记住上次选择的库', lsStore.wek_kb === 'kb-qua', lsStore.wek_kb)
-  H.kbPick('all')
+  await H.kbPick('all')
   T('切回全部恢复 8 篇', H.WEK.items.length === 8, H.WEK.items.length)
   console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败')
   process.exit(fail ? 1 : 0)
