@@ -444,8 +444,7 @@
       + '<div class="sp"></div>'
       + (busy
         ? '<span class="ba-chip stop" onclick="baStop(\'' + (c ? c.id : '') + '\')">⏹ 停止</span>'
-        : '<span class="ba-chip gen" onclick="baGenDraft()">⚡ 生成方案初稿</span>'
-          + '<span class="ba-chip" onclick="baReset(\'' + (c ? c.id : '') + '\')">🔄 重开</span>')
+        : '<span class="ba-chip gen" onclick="baGenDraft()">⚡ 生成方案初稿</span>')
       + '<button class="ba-send" ' + (active ? 'onclick="baSendFromInput()"' : 'disabled') + '>发送 ➤</button>'
       + '</div></div>'
   }
