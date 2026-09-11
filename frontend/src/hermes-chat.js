@@ -8,6 +8,7 @@
  *   - 新建任务为「纯新对话」，不再自动注入项目背景。
  *   - 第一次用户发送或点击「生成完整初稿」时才创建 Hermes session。
  *   - 任务对象保存 hxSessionId（短码）与 hxStoredSessionId（长码），刷新/重启可恢复。
+ *   - 异步轮询：SSE 断线后自动切换到轮询模式，后台任务完成后推送结果。
  *   - 其余模块（项目管理 / 知识库 / C139 / 工具箱）逻辑完全不变。
  * ========================================================================= */
 (function () {
@@ -15,14 +16,12 @@
 
   var API = (window.HX_API_BASE || '').replace(/\/$/, '')
 
-  /* 运行态放在内存里，绝不写进 localStorage（否则刷新后会残留"回复中"把输入框锁死） */
-  var HX_BUSY = {}, HX_CTRL = {}
-  /* 当前任务的文件附件：key=taskId, value=[{name,text,chars,ext}] */
+  /* 运行态放在内存里，绝不写进 localStorage */
+  var HX_BUSY = {}, HX_CTRL = {}, HX_POLL = {}
   var HX_ATTACH = {}
   function hxBusy(id) { return !!HX_BUSY[id] }
   window.hxBusy = hxBusy
 
-  /* 清理上一次会话可能残留的流式状态 */
   function hxSanitize() {
     ;(store.tasks || []).forEach(function (t) {
       if (t.hxBusy) delete t.hxBusy
@@ -37,7 +36,7 @@
   }
   hxSanitize()
 
-  /* ---------------- 样式（注入，不改 styles.css） ---------------- */
+  /* ---------------- 样式（注入） ---------------- */
   var css = ''
     + '.hx-badge{display:inline-block;margin-left:10px;padding:2px 9px;border-radius:20px;font-size:11.5px;font-weight:700;vertical-align:middle;background:#eef1f6;color:#6b7280}'
     + '.hx-badge.ok{background:rgba(34,160,90,.12);color:#1a8a4e}'
@@ -63,6 +62,8 @@
     + '.hx-attach .meta{font-size:10px;color:var(--sub)}'
     + '.hx-attach-row{display:flex;flex-wrap:wrap;gap:6px;padding:6px 10px}'
     + '.hx-attach-err{color:var(--bad);font-size:11px;padding:4px 10px}'
+    + '.hx-poll-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;background:rgba(59,130,246,.1);color:#2563eb;font-size:12px;font-weight:600;animation:hxpulse 2s ease-in-out infinite}'
+    + '@keyframes hxpulse{0%,100%{opacity:1}50%{opacity:.6}}'
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st)
 
   /* ---------------- 健康检查徽标 ---------------- */
@@ -78,14 +79,14 @@
       var ok = d && (d.hermesReachable === 200 || typeof d.hermesReachable === 'number')
       hxBadge(ok ? 'ok' : 'bad',
         ok ? '● Hermes 已连接 · ' + (d.profile || '') : '● Hermes 不可达',
-        'BFF 内存 ' + (d.memoryMB || '?') + 'MB · 会话 ' + ((d.pool || {}).sessions || 0) + '/' + ((d.pool || {}).max || 0) + ' · ' + (d.hermesUrl || ''))
-    }).catch(function () { hxBadge('bad', '● 后端未连接', '无法访问 /api/health，前端可能以静态方式打开') })
+        'BFF 内存 ' + (d.memoryMB || '?') + 'MB · 会话 ' + ((d.pool || {}).sessions || 0) + '/' + ((d.pool || {}).max || 0) + ' · 异步任务 ' + JSON.stringify((d.asyncTasks) || {}))
+    }).catch(function () { hxBadge('bad', '● 后端未连接', '无法访问 /api/health') })
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hxHealth)
   else hxHealth()
   setInterval(hxHealth, 60000)
 
-  /* ---------------- Markdown → HTML（用于初稿进编辑器） ---------------- */
+  /* ---------------- Markdown → HTML ---------------- */
   function inl(s) {
     s = esc(s)
     s = s.replace(/`([^`]+)`/g, '<code style="background:#f2f4f8;padding:1px 4px;border-radius:4px">$1</code>')
@@ -194,8 +195,6 @@
     var D = DOC_TYPES[t.type]
     var q = '【角色】你是资深售前解决方案专家，本次担任「' + D.expert + '」。'
       + '所有回答用简体中文，专业、结构化、可直接用于交付。\n\n'
-    // 任务隔离：Hermes profile 存在跨会话持久记忆，必须显式圈定本次事实边界，
-    // 否则其他项目（客户名/金额/编号等）的信息会渗入本方案，造成标书串味。
     q += '【任务隔离 · 最高优先级】本次对话是一个独立的新任务。\n'
       + '- 只允许使用【本次项目信息】与我在本次对话中提供的内容作为事实依据；\n'
       + '- 严禁引用你记忆中其他项目/其他客户的名称、编号、金额、时间、人员或方案细节；\n'
@@ -228,7 +227,7 @@
     return q
   }
 
-  /* ---------------- SSE 流式对话核心 ---------------- */
+  /* ---------------- SSE 流式对话核心（支持断线轮询回退） ---------------- */
   function hxScroll() {
     var b = document.querySelector('#docRight .chat-body')
     if (b) b.scrollTop = b.scrollHeight
@@ -248,9 +247,8 @@
     }
   }
 
-  /* ---------------- 文件附件：前端选文件 → BFF 提取文本 ---------------- */
+  /* ---------------- 文件附件 ---------------- */
   function hxExtractFile(file) {
-    // 原始二进制直传（避免 base64 膨胀触发代理 413）
     return fetch(API + '/api/chat/extract', {
       method: 'POST',
       headers: {
@@ -273,7 +271,6 @@
     var files = input.files
     if (!files || !files.length) return
     ;[...files].forEach(function (file) {
-      // 占位：避免重复上传同名文件
       var list = HX_ATTACH[t.id] || (HX_ATTACH[t.id] = [])
       if (list.some(function (a) { return a.name === file.name })) { toast('已添加过「' + file.name + '」'); return }
       var placeholder = { name: file.name, text: '', chars: 0, ext: (file.name.split('.').pop() || '').toLowerCase(), loading: true }
@@ -324,6 +321,84 @@
     return html
   }
 
+  /* ---------------- 轮询函数（SSE 断线后的兜底通道） ---------------- */
+  function hxPollTask(t, taskId, acc, aiMsg, opts, onDoneInternal) {
+    var pollTimer = null
+    var pollCount = 0
+
+    function poll() {
+      fetch(API + '/api/chat/poll/' + encodeURIComponent(taskId))
+        .then(function (r) {
+          if (!r.ok) throw new Error('轮询失败 HTTP ' + r.status)
+          return r.json()
+        })
+        .then(function (d) {
+          pollCount++
+
+          if (d.status === 'done') {
+            // 任务完成
+            var finalText = d.text || acc || ''
+            if (d.sessionId) {
+              t.hxSessionId = d.sessionId
+              t.hxStoredSessionId = d.storedSessionId || t.hxStoredSessionId
+              t.hx = true
+              persist()
+            }
+            onDoneInternal(finalText, null)
+            return
+          }
+
+          if (d.status === 'error') {
+            onDoneInternal(d.text || acc || '', d.error || '后台处理失败')
+            return
+          }
+
+          // 仍在处理中 — 更新部分文本和状态
+          var fullText = d.text || ''
+          if (fullText && fullText.length > acc.length) {
+            acc = fullText
+            aiMsg.text = acc
+            var live = document.getElementById('hxLive')
+            if (live) { live.textContent = acc; hxScroll() }
+          }
+
+          // 用最新事件更新状态
+          if (d.events && d.events.length) {
+            var lastEv = d.events[d.events.length - 1]
+            if (lastEv.type === 'status') {
+              hxSetStatus(lastEv.text || '后台处理中…')
+            }
+          }
+
+          var elapsedMin = Math.round((Date.now() - (d.createdAt || Date.now())) / 60000)
+          if (elapsedMin < 60) {
+            hxSetStatus('后台处理中… 已运行 ' + elapsedMin + ' 分钟，请耐心等待')
+          } else {
+            hxSetStatus('后台处理中… 已运行 ' + Math.round(elapsedMin / 60) + ' 小时 ' + (elapsedMin % 60) + ' 分钟，完成后将自动显示结果')
+          }
+
+          // 继续轮询
+          pollTimer = setTimeout(poll, 30000)
+        })
+        .catch(function (e) {
+          // 网络错误，继续重试
+          hxSetStatus('网络暂时中断，将在 60 秒后重试…')
+          pollTimer = setTimeout(poll, 60000)
+        })
+    }
+
+    // 立即开始第一次轮询
+    hxSetStatus('连接已断开，正在切换轮询模式…')
+    pollTimer = setTimeout(poll, 2000)
+
+    // 返回控制器
+    return {
+      abort: function () {
+        if (pollTimer) clearTimeout(pollTimer)
+      }
+    }
+  }
+
   function hxSend(t, text, opts) {
     opts = opts || {}
     if (!t) return Promise.resolve()
@@ -343,8 +418,9 @@
     var ctrl = new AbortController()
     HX_CTRL[t.id] = ctrl
     var acc = ''
+    var pollTaskId = null
+    var finished = false
 
-    // provider 慢/过载时的友好提示：首条消息后若 22s 仍无正文，给出明确反馈，避免"卡死"错觉
     var slowTimer = setTimeout(function () {
       if (!acc) hxSetStatus('模型响应较慢：provider 可能繁忙或过载，请稍候，系统会在恢复后继续…')
     }, 22000)
@@ -355,11 +431,14 @@
     }
 
     function finish(finalText, errMsg) {
+      if (finished) return
+      finished = true
       clearTimeout(slowTimer)
       aiMsg.text = finalText || acc || ''
       delete aiMsg.streaming
       delete HX_CTRL[t.id]
       delete HX_BUSY[t.id]
+      delete HX_POLL[t.id]
       if (errMsg) aiMsg.error = errMsg
       persist()
       renderRightPanel(); renderTaskList(); hxScroll()
@@ -370,7 +449,6 @@
     var payload = { key: t.id, text: text, reset: !!opts.reset, sessionId: t.hxSessionId || null }
     if (attachList.length) {
       payload.attachments = attachList.map(function (a) { return { name: a.name, text: a.text } })
-      // 发送后清空已使用的附件，避免重复注入
       HX_ATTACH[t.id] = []
     }
     return fetch(API + '/api/chat', {
@@ -387,7 +465,17 @@
 
       function pump() {
         return reader.read().then(function (res) {
-          if (res.done) { finish(finalText, errText); return }
+          if (res.done) {
+            // SSE 正常结束
+            if (finalText === null && errText === null && pollTaskId) {
+              // SSE 结束但任务未完成 — 切换轮询
+              if (HX_POLL[t.id]) { HX_POLL[t.id].abort() }
+              HX_POLL[t.id] = hxPollTask(t, pollTaskId, acc, aiMsg, opts, finish)
+              return
+            }
+            finish(finalText, errText)
+            return
+          }
           buf += dec.decode(res.value, { stream: true })
           var parts = buf.split('\n\n')
           buf = parts.pop() || ''
@@ -398,6 +486,7 @@
               if (!payload) return
               var ev
               try { ev = JSON.parse(payload) } catch (e) { return }
+              if (ev.type === 'task') { pollTaskId = ev.taskId; return }
               if (ev.type === 'delta') { acc += ev.text || ''; aiMsg.text = acc; clearTimeout(slowTimer); hxSetStatus(''); paint() }
               else if (ev.type === 'status') hxSetStatus(ev.text || '')
               else if (ev.type === 'session') {
@@ -417,7 +506,14 @@
       }
       return pump()
     }).catch(function (e) {
+      if (finished) return
       if (e && e.name === 'AbortError') { finish(acc + '\n\n（已手动中断）'); return }
+      // SSE 连接错误 — 尝试切换轮询
+      if (pollTaskId) {
+        hxSetStatus('连接中断，正在切换轮询模式…')
+        HX_POLL[t.id] = hxPollTask(t, pollTaskId, acc, aiMsg, opts, finish)
+        return
+      }
       var m = String(e && e.message || e)
       finish(acc || '', m)
       toast('对话失败：' + m)
@@ -426,7 +522,10 @@
   window.hxSend = hxSend
 
   function hxStop(id) {
-    if (HX_CTRL[id]) { HX_CTRL[id].abort(); toast('已中断本次回复') }
+    if (HX_CTRL[id]) { try { HX_CTRL[id].abort() } catch (_) {} delete HX_CTRL[id] }
+    if (HX_POLL[id]) { try { HX_POLL[id].abort() } catch (_) {} delete HX_POLL[id] }
+    delete HX_BUSY[id]
+    toast('已中断本次回复')
   }
   window.hxStop = hxStop
 
@@ -450,7 +549,6 @@
   window.hxReset = hxReset
 
   /* ---------------- 覆盖：创建任务 ---------------- */
-  // 原 main.js 的 createDocTask 会走本地问答流程；我们整体替换为「纯新对话」，不再自动注入背景。
   window.createDocTask = function (type) {
     var pid = document.getElementById('docProj').value
     if (!pid) { toast('请先在①关联项目'); return }
@@ -495,7 +593,7 @@
     if (hxBusy(t.id)) { toast('专家正在回复中，请稍候'); return }
     hxSend(t, hxDraftPrompt(t), {
       hidden: true,
-      statusText: '专家正在撰写完整初稿，通常需要 1-3 分钟…',
+      statusText: '专家正在撰写完整初稿，可能需要较长时间，请耐心等待…',
       onDone: function (txt) {
         var body = String(txt || '').trim()
         if (!body) { toast('初稿生成失败，请重试或先补充信息'); return }
@@ -571,7 +669,6 @@
     if (el) el.classList.remove('on')
   }
 
-  // 选择历史会话：如果已关联本地任务则打开；否则绑定到当前任务（需要 shortId）
   window.hxPickSession = function (el) {
     var longId = el.dataset.long
     var shortId = el.dataset.short
@@ -586,7 +683,6 @@
       toast('该会话缺少短码，无法继续对话。建议新建任务开始新对话。')
       return
     }
-    // 未关联：询问是否把当前任务绑定到该会话
     t = curTaskId ? getTask(curTaskId) : null
     if (!t) { toast('请先创建一个任务，再关联历史会话'); return }
     if (!confirm('把当前任务「' + (t.title || DOC_TYPES[t.type].name) + '」关联到该 Hermes 会话？')) return
@@ -606,7 +702,7 @@
     })
   }
 
-  /* ---------------- 覆盖：对话区渲染（支持流式 + 空状态） ---------------- */
+  /* ---------------- 覆盖：对话区渲染（支持流式 + 空状态 + 轮询模式） ---------------- */
   window.chatBodyHtml = function (t) {
     var D = DOC_TYPES[t.type]
     var h = '<div class="chat-body">'
@@ -665,11 +761,10 @@
       + '</div></div>'
   }
 
-  /* ---------------- 覆盖：任务列表渲染，增加 Hermes 绑定标识 ---------------- */
+  /* ---------------- 覆盖：任务列表渲染 ---------------- */
   var _renderTaskList = window.renderTaskList
   window.renderTaskList = function () {
     _renderTaskList()
-    // 在任务列表底部追加历史会话入口（如果列表容器存在）
     var el = document.getElementById('taskList')
     if (!el) return
     var foot = document.getElementById('hxTaskFoot')
@@ -682,7 +777,7 @@
     }
   }
 
-  /* ---------------- 覆盖：右侧面板，在历史会话弹窗关闭后重新渲染 ---------------- */
+  /* ---------------- 覆盖：右侧面板 ---------------- */
   var _rrp = window.renderRightPanel
   window.renderRightPanel = function () {
     _rrp.apply(this, arguments)
@@ -695,5 +790,5 @@
     }
   }
 
-  console.log('[hermes-chat] 已接管方案制作中心对话（BFF: ' + (API || '同源') + '/api/chat）')
+  console.log('[hermes-chat] 已接管方案制作中心对话（BFF: ' + (API || '同源') + '/api/chat，支持异步轮询回退）')
 })()

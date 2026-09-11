@@ -3,6 +3,7 @@
  * 售前解决方案工作台 · BFF
  * - 托管前端静态文件（无需 Nginx）
  * - /api/chat 以 SSE 流式代理 Hermes Agent（profile=wordpresales）
+ * - 异步任务层：SSE 断开后后台任务继续运行，前端可轮询 /api/chat/poll/:taskId
  * - 新增 /api/sessions：返回 Hermes wordpresales 历史会话，与本地任务对齐
  * - 新增 /api/session/attach：把前端任务绑定到已有 Hermes session
  * - 零第三方依赖：仅用 Node 内置模块 + Node22 全局 fetch/WebSocket
@@ -16,14 +17,13 @@ const fsp = require('node:fs/promises')
 const path = require('node:path')
 const { HermesPool, hermesCookieCached, invalidateCookieCache } = require('./hermes.js')
 const { extractText } = require('./extract.js')
+const { createTask, getTask, findRunning, stats: taskStats } = require('./async-task.js')
 
 const PORT = Number(process.env.PORT || 8088)
 const HOST = process.env.BIND_HOST || '0.0.0.0'
 const FRONT_DIR = path.resolve(process.env.FRONT_DIR || path.join(__dirname, '..', 'frontend'))
 const MAX_BODY = 2 * 1024 * 1024
 const MAX_ATTACHMENT = 10 * 1024 * 1024
-// 单文件提取文本送入模型的最大字符数：默认 80000，覆盖常见标书/采购文件全文（如 3.5 万字 doc）。
-// 仍保留截断提示，避免超大文档撑爆模型上下文；可用环境变量调大。
 const MAX_ATTACH_CHARS = Number(process.env.MAX_ATTACH_CHARS || 80000)
 const HEALTH_TTL_MS = Number(process.env.HEALTH_TTL_MS || 15000)
 const WEKNORA_TIMEOUT_MS = Number(process.env.WEKNORA_TIMEOUT_MS || 30000)
@@ -102,7 +102,6 @@ async function serveStatic(req, res, urlPath) {
 
   let st
   try { st = await fsp.stat(full) } catch (_) {
-    // 单页应用兜底
     try {
       const idx = path.join(FRONT_DIR, 'index.html')
       const buf = await fsp.readFile(idx)
@@ -114,7 +113,7 @@ async function serveStatic(req, res, urlPath) {
   if (st.isDirectory()) return serveStatic(req, res, path.posix.join(rel, 'index.html'))
 
   const ext = path.extname(full).toLowerCase()
-  const etag = `W/"${st.size}-${Number(st.mtimeMs).toString(36)}"`
+  const etag = `W/"${st.size}-${Number(st.mtimeMs).toString(36)}`
   if (req.headers['if-none-match'] === etag) { res.writeHead(304).end(); return }
   res.writeHead(200, {
     'content-type': MIME[ext] || 'application/octet-stream',
@@ -125,14 +124,14 @@ async function serveStatic(req, res, urlPath) {
   fs.createReadStream(full).pipe(res)
 }
 
-/* ---------------- Hermes 通用：拿会话列表（复用 hermes.js 的登录 Cookie 缓存） ---------------- */
+/* ---------------- Hermes 通用：拿会话列表 ---------------- */
 async function hermesSessions() {
   const url = process.env.HERMES_URL || 'http://127.0.0.1:9119'
   const profile = process.env.HERMES_PROFILE || 'wordpresales'
   const cookie = await hermesCookieCached()
   const r = await fetchWithTimeout(`${url}/api/sessions`, { headers: { cookie } }, HERMES_TIMEOUT_MS)
   if (!r.ok) {
-    if (r.status === 401) invalidateCookieCache() // Cookie 失效，下次自动重登
+    if (r.status === 401) invalidateCookieCache()
     throw new Error(`Hermes /api/sessions 失败 HTTP ${r.status}`)
   }
   const data = await r.json()
@@ -140,7 +139,7 @@ async function hermesSessions() {
   return sessions
 }
 
-/* ---------------- SSE 对话 ---------------- */
+/* ---------------- SSE 对话（异步后台任务 + SSE 实时流 + 断线轮询兜底） ---------------- */
 async function handleChat(req, res) {
   let body
   try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { error: e.message }) }
@@ -164,6 +163,17 @@ async function handleChat(req, res) {
   const text = promptText.trim()
   if (!text) return sendJson(res, 400, { error: 'text 不能为空' })
 
+  // 检查是否已有进行中的任务（防止重复提交）
+  const existing = findRunning(key)
+  let task
+  if (existing && !reset) {
+    task = existing
+    log(`任务 ${task.id} 已在运行中，复用（key=${key}）`)
+  } else {
+    task = createTask(pool, key, text, { sessionId, reset })
+    log(`创建后台任务 ${task.id}（key=${key}）`)
+  }
+
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache, no-transform',
@@ -173,50 +183,60 @@ async function handleChat(req, res) {
   res.write(': open\n\n')
 
   let closed = false
-  req.on('close', () => { closed = true })
+  const cleanup = () => { clearInterval(beat); clearInterval(streamTimer) }
+  req.on('close', () => { closed = true; cleanup() })
   const send = (obj) => {
     if (closed) return
     try { res.write(`data: ${JSON.stringify(obj)}\n\n`) } catch (_) { closed = true }
   }
   const beat = setInterval(() => { if (!closed) { try { res.write(': ping\n\n') } catch (_) {} } }, 15000)
 
-  if (reset) pool.drop(key)
+  // 立即发送 taskId，前端可用于断线后轮询
+  send({ type: 'task', taskId: task.id })
+  send({ type: 'status', text: task.status === 'processing' ? '正在连接专家智能体…' : '任务已完成' })
 
-  const attempt = async (isRetry, preferredSessionId) => {
-    const sess = pool.get(key, preferredSessionId)
-    if (!sess.connected) {
-      send({ type: 'status', text: isRetry ? '会话已失效，正在重建…' : '正在连接专家智能体…' })
-      const info = await sess.open(preferredSessionId)
-      send({ type: 'session', sessionId: sess.sessionId, storedSessionId: sess.storedSessionId, model: sess.model })
-      if (info && info.sessionId) {
-        pool.recordSession(key, sess.sessionId, sess.storedSessionId)
-      }
-    }
-    return sess.submit(text, (ev) => send(ev))
-  }
+  // 从后台任务流式转发事件到 SSE
+  let lastSentIdx = 0
+  const streamTimer = setInterval(() => {
+    if (closed) return
 
-  try {
-    let result
-    try {
-      result = await attempt(false, sessionId)
-    } catch (e1) {
-      const msg = String(e1 && e1.message || e1)
-      const retryable = /session not found|WebSocket|未连接|已断开|断开|超时|closed|ECONN|fetch failed/i.test(msg)
-      if (!retryable) throw e1
-      log('第一次提交失败，重建会话重试：', msg)
-      pool.drop(key)
-      result = await attempt(true, null)
+    // 发送尚未推送的事件
+    while (lastSentIdx < task.events.length) {
+      send(task.events[lastSentIdx])
+      lastSentIdx++
     }
-    // 记录本次使用的 session 映射
-    pool.recordSession(key, result.sessionId, result.storedSessionId)
-    send({ type: 'done', text: result.text || '', status: result.status || 'complete', usage: result.usage || null, sessionId: result.sessionId, storedSessionId: result.storedSessionId })
-  } catch (err) {
-    log('对话失败:', err && err.message)
-    send({ type: 'error', message: String(err && err.message || err) })
-  } finally {
-    clearInterval(beat)
-    if (!closed) { try { res.end() } catch (_) {} }
-  }
+
+    // 检查完成状态
+    if (task.status === 'done') {
+      send({ type: 'done', text: task.result, status: 'complete', sessionId: task.sessionId, storedSessionId: task.storedSessionId })
+      cleanup()
+      if (!closed) { try { res.end() } catch (_) {} }
+    } else if (task.status === 'error') {
+      send({ type: 'error', message: task.error || '未知错误' })
+      cleanup()
+      if (!closed) { try { res.end() } catch (_) {} }
+    }
+  }, 500)
+}
+
+/* ---------------- 轮询任务状态（SSE 断线后的兜底通道） ---------------- */
+async function handlePoll(req, res, taskId) {
+  const task = getTask(taskId)
+  if (!task) return sendJson(res, 404, { error: '任务不存在或已过期' })
+
+  const recentEvents = task.events.slice(-50)
+  return sendJson(res, 200, {
+    taskId: task.id,
+    status: task.status,
+    text: task.result,
+    events: recentEvents,
+    error: task.error,
+    sessionId: task.sessionId,
+    storedSessionId: task.storedSessionId,
+    model: task.model,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  })
 }
 
 /* ---------------- 聊天文件附件：提取文本 ---------------- */
@@ -240,7 +260,6 @@ async function handleExtract(req, res) {
   let buf
   try {
     if (ct.includes('application/octet-stream')) {
-      // 原始二进制直传（省去 base64 的 33% 膨胀，缓解代理 413）
       name = decodeURIComponent(String(req.headers['x-filename'] || '').trim())
       buf = await readRaw(req, MAX_ATTACHMENT)
     } else {
@@ -281,7 +300,7 @@ async function handleSessions(req, res) {
     const list = sessions.map((s) => {
       const local = byLong.get(s.id) || null
       return {
-        id: s.id,                       // long id（与 Hermes 历史列表一致）
+        id: s.id,
         shortId: local ? local.shortId : null,
         localKey: local ? local.key : null,
         preview: s.preview || '',
@@ -313,7 +332,7 @@ async function handleAttach(req, res) {
   const longId = body.longId ? String(body.longId).slice(0, 128) : null
   if (!key || !shortId) return sendJson(res, 400, { error: 'key 与 shortId 必填' })
   pool.attach(key, shortId, longId)
-  pool.drop(key) // 强制下次 get 时重建连接并复用 shortId
+  pool.drop(key)
   return sendJson(res, 200, { ok: true, key, shortId, longId })
 }
 
@@ -323,7 +342,6 @@ const WEKNORA_API_KEY = process.env.WEKNORA_API_KEY || ''
 const WEKNORA_KB_ID = process.env.WEKNORA_KB_ID || ''
 const WEKNORA_ENABLED = !!(WEKNORA_API_KEY && WEKNORA_KB_ID)
 
-/* WeKnora 可见知识库白名单：前端可切库查询，但只能用该 API Key 有权访问的库 */
 let _kbAllow = { at: 0, set: null }
 async function kbAllowed() {
   if (_kbAllow.set && Date.now() - _kbAllow.at < 60000) return _kbAllow.set
@@ -360,11 +378,11 @@ function proxyToWeKnora(req, res, targetPath, search, opts) {
     path: `/api/v1${targetPath}${qs}`,
     method: req.method,
     headers: { ...req.headers, 'x-api-key': WEKNORA_API_KEY },
-    timeout: WEKNORA_TIMEOUT_MS, // 防止 WeKnora 卡死时 BFF 连接挂起、socket 泄漏
+    timeout: WEKNORA_TIMEOUT_MS,
   }
   delete options.headers.host
   delete options.headers.connection
-  delete options.headers['content-length'] // 让 Node 根据实际 body 重新计算
+  delete options.headers['content-length']
 
   const proxyReq = http.request(options, (proxyRes) => {
     const h = opts.disposition ? Object.assign({}, proxyRes.headers, { 'content-disposition': opts.disposition }) : proxyRes.headers
@@ -383,10 +401,7 @@ function proxyToWeKnora(req, res, targetPath, search, opts) {
   req.pipe(proxyReq)
 }
 
-/* ---------------- 文档目录归属映射（后端持久化，跨浏览器/跨设备一致） ----------------
-   键=文档 id，值=目录节点 id（缺失/null = 未归类，仅出现在「全部知识」）。
-   WeKnora 文档本身不带目录，目录是前端组织层；此前存浏览器 localStorage 会跨设备不同步，
-   现下沉到服务端文件，前端读写此接口即可保持一致。 */
+/* ---------------- 文档目录归属映射 ---------------- */
 const CATMAP_FILE = path.join(DATA_DIR, 'kb-catmap.json')
 let _catMap = (() => { try { return JSON.parse(fs.readFileSync(CATMAP_FILE, 'utf8') || '{}') || {} } catch (_) { return {} } })()
 function saveCatMap() {
@@ -410,13 +425,9 @@ async function handleCatMapPut(req, res) {
   return sendJson(res, 200, { ok: true, docId, catId })
 }
 
-/* ---------------- 工作台业务数据落库（SQLite） ----------------
-   前端 store 的每个顶层集合（projects/docs/pdocs/…）= state 表一行；
-   localStorage 降级为「秒开缓存 + 离线兜底」，服务器为唯一事实来源。
-   接口：GET /api/state｜GET /api/state/:key｜PUT /api/state/:key｜POST /api/state/import｜DELETE /api/state/:key */
+/* ---------------- 工作台业务数据落库（SQLite） ---------------- */
 const DB = require('./db.js')
 const STATE_FILE = path.join(DATA_DIR, process.env.DB_FILE || 'presales.db')
-// 整块集合 JSON 可能远大于普通 API 请求（方案正文多、批量导入），单独放宽上限
 const MAX_STATE_BODY = Number(process.env.MAX_STATE_BODY || 16 * 1024 * 1024)
 let _dbReady = false
 try {
@@ -431,7 +442,6 @@ function dbUnavailable(res) {
   return sendJson(res, 503, { error: '数据库不可用', detail: 'SQLite 未就绪，前端将退回浏览器本地模式' })
 }
 
-/** GET /api/state[?meta=1][&keys=a,b]  meta=1 只回 rev/size/更新时间；keys 只回指定集合 */
 async function handleStateList(req, res, sp) {
   if (!_dbReady) return dbUnavailable(res)
   const metaOnly = !!(sp && sp.get('meta'))
@@ -442,7 +452,7 @@ async function handleStateList(req, res, sp) {
     for (const raw of String(keysParam).split(',')) {
       const k = raw.trim()
       if (!k) continue
-      try { const row = DB.get(k, !metaOnly); if (row) states[k] = row } catch (_) { /* 非法集合名忽略 */ }
+      try { const row = DB.get(k, !metaOnly); if (row) states[k] = row } catch (_) {}
     }
   } else {
     states = DB.listAll(!metaOnly)
@@ -458,7 +468,6 @@ async function handleStateGet(req, res, key) {
   return sendJson(res, 200, { ok: true, key, ...row })
 }
 
-/** body: { data, rev?, by?, force? } → 200 {rev}｜409 {error:'rev_conflict'} */
 async function handleStatePut(req, res, key) {
   if (!_dbReady) return dbUnavailable(res)
   let body
@@ -474,7 +483,6 @@ async function handleStatePut(req, res, key) {
   return sendJson(res, 200, { ok: true, ...r })
 }
 
-/** 批量写入：导入备份 / 首次上云迁移。body: { states: {key: data}, by? } */
 async function handleStateImport(req, res) {
   if (!_dbReady) return dbUnavailable(res)
   let body
@@ -492,10 +500,8 @@ async function handleStateDelete(req, res, key) {
   catch (e) { return sendJson(res, 400, { error: e.message }) }
 }
 
-/* ---------------- 通用文件上传/下载（资料原件以 BLOB 存进 SQLite） ----------------
-   历史上原件写 data/files/ 目录 + files-index.json，「记录在库、原件在盘」是两套状态，迁盘/换机容易只保住一半；
-   现在统一进 presales.db 的 files 表。下载/删除仍先查库，查不到再回落旧目录，兼容历史文件。 */
-const MAX_DB_FILE = Number(process.env.MAX_DB_FILE || 32 * 1024 * 1024) // 单文件上限 32MB（容器整体内存上限 320MB）
+/* ---------------- 通用文件上传/下载 ---------------- */
+const MAX_DB_FILE = Number(process.env.MAX_DB_FILE || 32 * 1024 * 1024)
 async function handleFileUpload(req, res) {
   let name = ''
   let buf
@@ -544,7 +550,7 @@ async function handleFileDownload(req, res, fileId) {
     const f = DB.getFile(fileId)
     if (f) return sendFileBuf(res, f.buf, f.mime, f.name)
   }
-  const meta = _filesIndex[fileId] // 回落：历史磁盘文件
+  const meta = _filesIndex[fileId]
   try {
     const buf = fs.readFileSync(path.join(FILE_DIR, fileId))
     return sendFileBuf(res, buf, meta && meta.mime, meta && meta.name ? meta.name : fileId)
@@ -562,7 +568,6 @@ async function handleFileDelete(req, res, fileId) {
   }
   return sendJson(res, 200, { ok: true, fileId, deleted })
 }
-/** GET /api/files[?scope=前缀] → 资料清单（库内条目 + 旧磁盘索引里还没入库的） */
 async function handleFileList(req, res, sp) {
   if (!_dbReady) return dbUnavailable(res)
   const scope = decodeURIComponent(String((sp && sp.get('scope')) || '')).slice(0, 127)
@@ -576,9 +581,7 @@ async function handleFileList(req, res, sp) {
 }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 9) }
 
-/* ---------------- AI 投入决策复核（GO / NO-GO） ----------------
-   打分在前端本地算完，这里只把结构化指标交给 Hermes 做一次「要不要投」的复核并返回原文，
-   由前端解析 JSON。会话按项目隔离（key=ai-go:<pid>），保留该项目上下文又不污染方案制作中心的会话。 */
+/* ---------------- AI 投入决策复核（GO / NO-GO） ---------------- */
 async function handleAiJudge(req, res) {
   let body
   try { body = await readBody(req, 256 * 1024) } catch (e) { return sendJson(res, 400, { error: e.message }) }
@@ -607,7 +610,89 @@ async function handleAiJudge(req, res) {
   }
 }
 
-/* ---------------- 健康检查（带 TTL 缓存，避免前端每 60s 轮询都打外部依赖） ---------------- */
+
+/* ---------------- Hermes 文件代理 ---------------- */
+async function handleHermesFileBrowse(req, res, sp) {
+  const url = process.env.HERMES_URL || 'http://127.0.0.1:9119'
+  const cookie = await hermesCookieCached()
+  const filePath = sp ? sp.get('path') : ''
+  if (!filePath) return sendJson(res, 400, { error: 'path 参数必填' })
+  const apiUrl = `${url}/api/files?path=${encodeURIComponent(filePath)}`
+  const r = await fetchWithTimeout(apiUrl, { headers: { cookie } }, HERMES_TIMEOUT_MS)
+  if (!r.ok) {
+    if (r.status === 401) invalidateCookieCache()
+    return sendJson(res, r.status, { error: `Hermes 文件浏览失败 HTTP ${r.status}` })
+  }
+  const data = await r.json()
+  return sendJson(res, 200, { ok: true, ...data })
+}
+
+async function handleHermesFileDownload(req, res, sp) {
+  const url = process.env.HERMES_URL || 'http://127.0.0.1:9119'
+  const cookie = await hermesCookieCached()
+  const filePath = sp ? sp.get('path') : ''
+  if (!filePath) return sendJson(res, 400, { error: 'path 参数必填' })
+  const apiUrl = `${url}/api/files/download?path=${encodeURIComponent(filePath)}`
+  const r = await fetchWithTimeout(apiUrl, { headers: { cookie } }, 300000)
+  if (!r.ok) {
+    if (r.status === 401) invalidateCookieCache()
+    return sendJson(res, r.status, { error: `Hermes 文件下载失败 HTTP ${r.status}` })
+  }
+  const ct = r.headers.get('content-type') || 'application/octet-stream'
+  const cd = r.headers.get('content-disposition') || ''
+  const buf = Buffer.from(await r.arrayBuffer())
+  res.writeHead(200, {
+    'content-type': ct,
+    'content-length': buf.length,
+    'content-disposition': cd || `attachment; filename="${encodeURIComponent(path.basename(filePath))}"`,
+    'cache-control': 'no-cache',
+  })
+  res.end(buf)
+}
+
+async function handleHermesFileList(req, res) {
+  const url = process.env.HERMES_URL || 'http://127.0.0.1:9119'
+  const cookie = await hermesCookieCached()
+  const wsBase = '/opt/data/profiles/wordpresales/workspace'
+
+  async function browseDir(dirPath) {
+    const apiUrl = `${url}/api/files?path=${encodeURIComponent(dirPath)}`
+    const r = await fetchWithTimeout(apiUrl, { headers: { cookie } }, HERMES_TIMEOUT_MS)
+    if (!r.ok) return []
+    const data = await r.json()
+    const results = []
+    for (const entry of (data.entries || [])) {
+      if (entry.is_directory) {
+        const subResults = await browseDir(entry.path)
+        results.push(...subResults)
+      } else {
+        const ext = path.extname(entry.name).toLowerCase()
+        if (['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls', '.pdf'].includes(ext)) {
+          results.push({
+            name: entry.name,
+            path: entry.path,
+            size: entry.size,
+            ext: ext,
+            mtime: entry.mtime,
+            mtimeStr: entry.mtime ? new Date(entry.mtime * 1000).toISOString() : null,
+          })
+        }
+      }
+    }
+    return results
+  }
+
+  try {
+    const files = await browseDir(wsBase)
+    files.sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+    return sendJson(res, 200, { ok: true, count: files.length, files })
+  } catch (err) {
+    log('扫描 Hermes workspace 文件失败:', err && err.message)
+    return sendJson(res, 502, { error: '扫描文件失败: ' + (err && err.message) })
+  }
+}
+
+/* ---------------- 健康检查 ---------------- */
 async function handleHealth(req, res) {
   if (Date.now() - _healthCache.at < HEALTH_TTL_MS && _healthCache.data) {
     return sendJson(res, 200, { ..._healthCache.data, cached: true })
@@ -622,6 +707,7 @@ async function handleHealth(req, res) {
     weknoraEnabled: WEKNORA_ENABLED,
     weknoraKbId: WEKNORA_KB_ID || null,
     pool: pool.stats(),
+    asyncTasks: taskStats(),
     memoryMB: Math.round(process.memoryUsage().rss / 1048576),
     node: process.version,
     db: _dbReady ? (() => { try { return DB.info() } catch (e) { return { error: e.message } } })() : { error: 'unavailable' },
@@ -645,6 +731,9 @@ const server = http.createServer(async (req, res) => {
   const url = req.url || '/'
   try {
     if (url === '/api/chat' && req.method === 'POST') return void (await handleChat(req, res))
+    if (url.startsWith('/api/chat/poll/') && req.method === 'GET') {
+      return void (await handlePoll(req, res, decodeURIComponent(url.slice('/api/chat/poll/'.length).split('?')[0])))
+    }
     if (url === '/api/chat/extract' && req.method === 'POST') return void (await handleExtract(req, res))
     if (url.startsWith('/api/sessions') && req.method === 'GET') return void (await handleSessions(req, res))
     if (url.startsWith('/api/session/attach') && req.method === 'POST') return void (await handleAttach(req, res))
@@ -683,8 +772,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 405, { error: 'method not allowed' })
     }
 
-    /* WeKnora 代理（只读）：前端通过 BFF 间接访问 WeKnora，不暴露 API Key 与 8080 端口。
-       按需求下线了上传与删除入口——向量库由 WeKnora 侧维护，工作台只做查询、预览、下载。 */
+    /* WeKnora 代理 */
     if (url.startsWith('/api/weknora/doc-category')) {
       if (req.method === 'GET') return void (await handleCatMapGet(req, res))
       if (req.method === 'PUT') return void (await handleCatMapPut(req, res))
@@ -717,6 +805,19 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 403, { error: '工作台侧已向量化知识库已改为只读（查询与下载），如需上传或清理请到 WeKnora 操作' })
     }
 
+    /* Hermes 文件代理 */
+    if (req.method === 'GET' && url.startsWith('/api/hermes/files/download')) {
+      const sp = new URL(url, 'http://localhost').searchParams
+      return void (await handleHermesFileDownload(req, res, sp))
+    }
+    if (req.method === 'GET' && url.startsWith('/api/hermes/files/list')) {
+      return void (await handleHermesFileList(req, res))
+    }
+    if (req.method === 'GET' && url.startsWith('/api/hermes/files')) {
+      const sp = new URL(url, 'http://localhost').searchParams
+      return void (await handleHermesFileBrowse(req, res, sp))
+    }
+
     if (url.startsWith('/api/reset') && req.method === 'POST') {
       const b = await readBody(req).catch(() => ({}))
       pool.drop(String(b.key || b.taskId || 'default').slice(0, 64))
@@ -740,8 +841,10 @@ server.listen(PORT, HOST, () => {
   log(`售前工作台 BFF 已启动  http://${HOST}:${PORT}`)
   log(`静态目录: ${FRONT_DIR}`)
   log(`Hermes: ${process.env.HERMES_URL || 'http://127.0.0.1:9119'}  profile=${process.env.HERMES_PROFILE || 'wordpresales'}`)
+  log(`超时: turn=${process.env.HERMES_TURN_TIMEOUT_MS || 300000}ms idle=${process.env.HERMES_IDLE_TIMEOUT_MS || 150000}ms`)
   if (!process.env.HERMES_PASS) log('警告：未设置 HERMES_PASS，对话将无法鉴权')
   log(`WeKnora: ${WEKNORA_ENABLED ? '已启用 KB=' + WEKNORA_KB_ID : '未配置'}`)
+  log('异步任务层已启用：SSE 断开后可轮询 /api/chat/poll/:taskId 获取结果')
 })
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

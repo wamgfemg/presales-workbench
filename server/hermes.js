@@ -23,7 +23,7 @@ const DEFAULTS = {
   pass: process.env.HERMES_PASS || '',
   profile: process.env.HERMES_PROFILE || 'wordpresales',
   turnTimeoutMs: Number(process.env.HERMES_TURN_TIMEOUT_MS || 300000), // 单回合最长 5 分钟
-  idleTimeoutMs: Number(process.env.HERMES_IDLE_TIMEOUT_MS || 150000), // 回合内无事件 2.5 分钟即判失败
+  idleTimeoutMs: Number(process.env.HERMES_IDLE_TIMEOUT_MS || 1800000), // 回合内无事件 30 分钟警告（不中断）
 }
 
 const INTERNAL_TYPES = new Set([
@@ -332,9 +332,12 @@ class HermesSession {
       )
       turn.idleTimer = setInterval(() => {
         if (Date.now() - turn.lastEvent > this.cfg.idleTimeoutMs) {
-          this._failTurn(new Error('Hermes 长时间无响应（回合空闲超时）'))
+          // Non-fatal: Hermes may be doing long operations (model fallback, tool calls, etc.)
+          // Don't kill the turn - just warn the user and reset the timer
+          turn.emit({ type: 'status', text: 'Hermes 正在处理中（模型可能切换或执行长任务），请耐心等待…' })
+          turn.lastEvent = Date.now()
         }
-      }, 5000)
+      }, 30000)
       this.turn = turn
 
       this._rpc('prompt.submit', {

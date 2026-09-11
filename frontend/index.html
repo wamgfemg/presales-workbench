@@ -20,6 +20,7 @@
       <button data-p="docs"><span class="ico">📝</span>方案制作中心</button>
       <button data-p="c139"><span class="ico">🎯</span>C139 赢单评估</button>
       <button data-p="tools"><span class="ico">🧰</span>投标工具箱</button>
+      <button data-p="bidagent"><span class="ico">🤝</span>投标智能体</button>
       <button data-p="stakeholders"><span class="ico">🧑‍‍🧑</span>干系人管理</button>
       <button data-p="chain"><span class="ico">🧭</span>决策链</button>
       <button data-p="contracts"><span class="ico">📋</span>合同管理</button>
@@ -194,6 +195,28 @@
           <div class="card"><h3>② 选择文档类型 · 对话任务</h3><div id="docTypes"></div></div>
         </div>
         <div class="card" id="docRight" style="display:flex;flex-direction:column;min-height:620px"></div>
+      </div>
+    </section>
+
+    <!-- ============ 投标智能体 ============ -->
+    <section class="page" id="p-bidagent">
+      <div class="page-head"><div><h2>投标智能体</h2><div class="desc">与 Hermes wordpresales 专家智能体直接对话 · 支持长时间异步处理 · 自动检测生成文档并提供下载</div></div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span id="baHxBadge" class="hx-badge">● 检测中</span>
+        </div>
+      </div>
+      <div class="ba-wrap">
+        <div class="ba-side">
+          <div class="ba-side-head">
+            <select id="baProjSelect" onchange="baOnProjChange()"><option value="">全部项目</option></select>
+            <button class="btn" onclick="baNewConvAction()">＋ 新对话</button>
+          </div>
+          <div class="ba-conv-list" id="baConvList"></div>
+        </div>
+        <div class="ba-main">
+          <div class="ba-chat" id="baChat"></div>
+          <div class="ba-input" id="baInputBar"></div>
+        </div>
       </div>
     </section>
 
@@ -477,5 +500,6 @@
   <script src="./src/kb-weknora.js"></script>
   <!-- 方案制作中心：接入 Hermes Agent(wordpresales) 真实对话，必须在 main.js 之后加载以覆盖本地模拟逻辑 -->
   <script src="./src/hermes-chat.js"></script>
+<script src="./src/bid-agent.js"></script>
 </body>
 </html>
