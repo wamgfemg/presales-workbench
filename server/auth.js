@@ -26,6 +26,8 @@ const MODULES = [
   { key: 'quotations', label: '报价管理' },
   { key: 'compintel', label: '竞争情报' },
   { key: 'requirements', label: '需求管理' },
+  { key: 'market', label: '市场情报' },
+  { key: 'marketdaily', label: '每日市场动态' },
 ]
 const MODULE_KEYS = MODULES.map(m => m.key)
 const LABEL = k => (MODULES.find(m => m.key === k) || {}).label || k
@@ -119,6 +121,7 @@ function authorize(user, p, method) {
   }
   if (p === '/api/files/upload' || p.startsWith('/api/files/')) return (canEdit('pdocs') || canEdit('contracts')) ? { ok: true } : { ok: false, error: '需要「项目知识库」或「合同管理」编辑权限' }
   if (p === '/api/weknora/doc-category') return canEdit('kb') ? { ok: true } : { ok: false, error: '需要「向量知识库」编辑权限' }
+  if (p.startsWith('/api/market')) return canEdit('market') ? { ok: true } : { ok: false, error: '需要「市场情报」编辑权限' }
   return { ok: true } // chat / qa / reset / attach 等：任何登录用户可用
 }
 

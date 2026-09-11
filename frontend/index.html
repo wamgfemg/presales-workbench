@@ -25,6 +25,8 @@
       <button data-p="contracts"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 2.5h7l4.5 4.5v13a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 4.5 20V4a1.5 1.5 0 0 1 2-1.5z"/><path d="M13.5 2.5V7h4.5M8 12.5h8M8 16h8M8 9h2"/></svg></span>合同管理</button>
       <button data-p="quotations"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 12.5l-8 8-9-9V4.5h7z"/><circle cx="7.6" cy="7.6" r="1.3"/></svg></span>报价管理</button>
       <button data-p="compintel"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2"/><path d="M20 20l-4.4-4.4"/></svg></span>竞争情报</button>
+      <button data-p="market"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.8 2.6 15.4 0 18M12 3c-2.6 2.8-2.6 15.4 0 18"/></svg></span>市场情报</button>
+      <button data-p="marketdaily"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4M7.5 13h5M7.5 16.5h8"/></svg></span>每日市场动态</button>
       <button data-p="docs"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L18.5 9.5l-4-4L4 16z"/><path d="M13.5 5.5l4 4"/></svg></span>方案制作中心</button>
       <!-- 需求管理入口已按需求隐藏（保留 DOM 与逻辑，去掉下一行的 style 即可恢复） -->
       <button data-p="requirements" style="display:none"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6l1 1 1.8-2M4.5 11.5l1 1 1.8-2M4.5 17l1 1 1.8-2"/></svg></span>需求管理</button>
@@ -294,6 +296,18 @@
     <section class="page" id="p-users">
       <div class="page-head"><div><h2>用户管理</h2><div class="desc">管理系统账号、角色与各模块访问权限（仅管理员可见）</div></div></div>
       <div id="usersBody"></div>
+    </section>
+
+    <!-- ============ 市场情报 ============ -->
+    <section class="page" id="p-market">
+      <div class="page-head"><div><h2>市场情报</h2><div class="desc">抓取/录入行业政策与竞品信息，AI 自动整理竞品对比表、行业简报并提炼要点</div></div></div>
+      <div id="marketBody"></div>
+    </section>
+
+    <!-- ============ 每日市场动态 ============ -->
+    <section class="page" id="p-marketdaily">
+      <div class="page-head"><div><h2>每日市场动态</h2><div class="desc">每日自动抓取的资讯与 AI 当日摘要，按天归档（保留最近 90 天）</div></div></div>
+      <div id="marketDailyBody"></div>
     </section>
 
     <!-- ============ 报价管理 ============ -->
@@ -577,5 +591,6 @@
   <script src="./src/hermes-chat.js"></script>
 <script src="./src/bid-agent.js"></script>
 <script src="./src/auth.js"></script>
+<script src="./src/market.js"></script>
 </body>
 </html>

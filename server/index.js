@@ -19,6 +19,7 @@ const { HermesPool, hermesCookieCached, invalidateCookieCache } = require('./her
 const { extractText } = require('./extract.js')
 const { createTask, getTask, findRunning, stats: taskStats } = require('./async-task.js')
 const auth = require('./auth.js')
+const market = require('./market.js')
 
 const PORT = Number(process.env.PORT || 8088)
 const HOST = process.env.BIND_HOST || '0.0.0.0'
@@ -832,6 +833,7 @@ const server = http.createServer(async (req, res) => {
         req.__user = user
       }
     }
+    if (url.startsWith('/api/market')) return void (await market.handle(req, res, url.split('?')[0]))
     if (url === '/api/chat' && req.method === 'POST') return void (await handleChat(req, res))
     if (url === '/api/qa/ask' && req.method === 'POST') return void (await handleQaAsk(req, res))
     if (url.startsWith('/api/chat/poll/') && req.method === 'GET') {
@@ -942,6 +944,8 @@ server.requestTimeout = 0   // SSE 长连接不设请求超时
 
 auth.init({ DATA_DIR, log })
 auth.ensureBootstrap()
+market.init({ DATA_DIR, log })
+market.startScheduler()
 
 server.listen(PORT, HOST, () => {
   log(`售前工作台 BFF 已启动  http://${HOST}:${PORT}`)
