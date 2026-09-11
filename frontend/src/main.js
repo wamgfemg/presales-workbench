@@ -1309,20 +1309,36 @@ function qaMd(t){
 function qaRender(){
   const box=document.getElementById('qaMsgs');if(!box)return;
   qaFillScope();
-  const q=document.getElementById('qaQuick');
-  if(q)q.innerHTML=(qaScope()==='all'?QA_QUICK_ALL:QA_QUICK_PROJ).map(x=>`<span class="tag clickable" onclick="qaAsk('${x.replace(/'/g,"\\'")}')">${esc(x)}</span>`).join('');
   const msgs=QA.msgs;
-  box.innerHTML=msgs.length?msgs.map(m=>`<div class="qa-msg ${m.role}">${m.role==='me'?'<b>我：</b>':(m.role==='ai'?'<b>参谋：</b>':'')}<div>${m.role==='me'?esc(m.text):qaMd(m.text)}</div>${m.meta?`<small style="color:var(--sub)">${esc(m.meta)}</small>`:''}</div>`).join('')
-    :`<div class="empty">问我点关于项目的事。回答基于工作台里已录入的数据（项目主档、C139、GO 判断、决策链、跟进、风险、竞争情报），没录的信息我会告诉你缺。</div>`
+  const quickList=qaScope()==='all'?QA_QUICK_ALL:QA_QUICK_PROJ;
+  const q=document.getElementById('qaQuick');
+  if(q){if(msgs.length){q.style.display='';q.innerHTML=quickList.map(x=>qaChip(x)).join('')}else{q.style.display='none'}}
+  if(!msgs.length){
+    box.innerHTML='<div class="qa-hero"><div class="qa-hero-ic">🧠</div>'
+      +'<div class="qa-hero-t">我是你的售前作战参谋</div>'
+      +'<div class="qa-hero-d">基于工作台里已录入的真实数据（项目主档、C139、GO 判断、决策链、跟进、风险、竞争情报）回答并给出可执行建议。直接提问，或点下面的例子：</div>'
+      +'<div class="qa-hero-grid">'+quickList.map(x=>'<button class="qa-ex" onclick="qaAsk(\''+x.replace(/'/g,"\\'")+'\')">'+esc(x)+'</button>').join('')+'</div></div>';
+    return;
+  }
+  box.innerHTML=msgs.map(qaBubble).join('');
   box.scrollTop=box.scrollHeight;
   const btn=document.getElementById('qaSendBtn');if(btn)btn.disabled=QA.busy;
 }
+function qaChip(x){return '<span class="qa-qchip" onclick="qaAsk(\''+x.replace(/'/g,"\\'")+'\')">'+esc(x)+'</span>'}
+function qaBubble(m){
+  const who=(m.role==='me')?'me':'ai';
+  const av=m.role==='me'?'我':'参';
+  const body=m.role==='me'?esc(m.text):qaMd(m.text);
+  return '<div class="qa-row '+who+'"><div class="qa-av">'+av+'</div><div class="qa-bub">'+body+(m.meta?'<div class="qa-meta">'+esc(m.meta)+'</div>':'')+'</div></div>';
+}
+function qaKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();qaSend()}}
+function qaAutoGrow(ta){ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,160)+'px'}
 function qaAsk(t){const e=document.getElementById('qaText');if(e){e.value=t;qaSend()}}
 async function qaSend(){
   const ta=document.getElementById('qaText');const q=(ta&&ta.value||'').trim();
   if(!q){toast('请先输入问题');return}
   if(QA.busy){toast('参谋正在回答中…');return}
-  QA.busy=true;QA.msgs.push({role:'me',text:q});if(ta)ta.value='';
+  QA.busy=true;QA.msgs.push({role:'me',text:q});if(ta){ta.value='';ta.style.height='auto'}
   const idx=QA.msgs.push({role:'ai',text:'',streaming:true})-1;
   const st=document.getElementById('qaStatus');qaRender();
   const key='qa:'+qaScope();
@@ -1349,8 +1365,8 @@ async function qaSend(){
   qaSave(QA.msgs);qaRender();
 }
 function qaRenderLive(i){const box=document.getElementById('qaMsgs');if(!box||!QA.msgs[i])return;
-  const m=QA.msgs[i];const last=box.lastElementChild;
-  if(last){last.innerHTML='<b>参谋：</b><div>'+qaMd(m.text)+(m.streaming?'<span class="qa-cursor">▍</span>':'')+'</div>'}
+  const last=box.lastElementChild;
+  if(last&&last.classList.contains('ai')){const bub=last.querySelector('.qa-bub');if(bub)bub.innerHTML=qaMd(QA.msgs[i].text)+(QA.msgs[i].streaming?'<span class="qa-cursor">▍</span>':'')}
   box.scrollTop=box.scrollHeight}
 
 /* ================= 仪表盘 ================= */

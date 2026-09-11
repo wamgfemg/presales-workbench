@@ -138,20 +138,24 @@
     </section>
 
     <!-- ============ 智能问答 ============ -->
-    <section class="page" id="p-qa">
-      <div class="page-head"><div><h2>智能问答</h2><div class="desc">基于工作台已有数据回答项目分析问题（商机、决策链、跟进、风险、GO 判断）</div></div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <select id="qaScope" onchange="qaScopeChange()" style="width:250px"></select>
-          <button class="btn ghost" onclick="qaClear()">清空对话</button></div></div>
-      <div class="card">
-        <div id="qaMsgs" class="qa-msgs"></div>
-        <div class="qa-quick" id="qaQuick"></div>
-        <div class="qa-input">
-          <textarea id="qaText" rows="2" placeholder="问点什么，例如：我手上哪些项目该放弃？／省农信项目下一步该做什么？／今年赢单率下滑是什么原因？"
-            onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){qaSend()}"></textarea>
-          <button class="btn" id="qaSendBtn" onclick="qaSend()">发送<span class="kbd">Ctrl+Enter</span></button>
+    <section class="page qa-page" id="p-qa">
+      <div class="page-head">
+        <div><h2>智能问答</h2><div class="desc">售前作战参谋 · 基于工作台真实数据，直接提问即可（商机 / 决策链 / 跟进 / 风险 / GO 判断 / 跨项目对比）</div></div>
+        <div class="qa-head-tools">
+          <label class="qa-scope"><span>范围</span><select id="qaScope" onchange="qaScopeChange()"></select></label>
+          <button class="btn sm ghost" onclick="qaClear()">清空对话</button>
         </div>
-        <div class="hint" id="qaStatus"></div>
+      </div>
+      <div class="qa-shell">
+        <div id="qaMsgs" class="qa-msgs"></div>
+        <div class="qa-composer">
+          <div class="qa-quick" id="qaQuick"></div>
+          <div class="qa-input">
+            <textarea id="qaText" rows="1" placeholder="直接输入你的问题，回车发送（Shift+Enter 换行）…" oninput="qaAutoGrow(this)" onkeydown="qaKey(event)"></textarea>
+            <button class="btn qa-send" id="qaSendBtn" onclick="qaSend()">发送</button>
+          </div>
+          <div class="qa-foot"><span id="qaStatus" class="qa-status"></span><span class="qa-tip">回答基于工作台已录入数据，未录入的会明确告知</span></div>
+        </div>
       </div>
     </section>
 
