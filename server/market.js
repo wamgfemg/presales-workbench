@@ -105,13 +105,21 @@ function extractArticle(html) {
 /* ---------- OpenRouter ---------- */
 async function ai(system, user, maxTokens) {
   if (!OR_KEY) throw new Error('未配置 OPENROUTER_API_KEY')
-  const r = await fetch(OR_URL + '/chat/completions', {
-    method: 'POST', headers: { 'authorization': 'Bearer ' + OR_KEY, 'content-type': 'application/json', 'x-title': 'Presales Market' },
-    body: JSON.stringify({ model: OR_MODEL, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens || 1400, temperature: 0.3 }),
-  })
-  if (!r.ok) throw new Error('OpenRouter ' + r.status + ' ' + (await r.text().catch(() => '')).slice(0, 150))
-  const j = await r.json()
-  return ((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim()
+  const ctl = new AbortController()
+  const to = setTimeout(() => { try { ctl.abort() } catch (_) {} }, Number(process.env.MARKET_AI_TIMEOUT_MS || 120000))
+  try {
+    const r = await fetch(OR_URL + '/chat/completions', {
+      method: 'POST', headers: { 'authorization': 'Bearer ' + OR_KEY, 'content-type': 'application/json', 'x-title': 'Presales Market' },
+      body: JSON.stringify({ model: OR_MODEL, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens || 1000, temperature: 0.3 }),
+      signal: ctl.signal,
+    })
+    if (!r.ok) throw new Error('OpenRouter ' + r.status + ' ' + (await r.text().catch(() => '')).slice(0, 150))
+    const j = await r.json()
+    return ((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim()
+  } catch (e) {
+    if (e && (e.name === 'AbortError' || /abort/i.test(String(e && e.message)))) throw new Error('AI 生成超时，请稍后重试')
+    throw e
+  } finally { clearTimeout(to) }
 }
 const SYS_MARKET = '你是售前团队的市场情报分析助手。用中文、简洁专业、只依据给定材料，不编造。输出用轻量 Markdown（可用小标题、列表、表格）。'
 
@@ -142,7 +150,7 @@ async function makeDigest() {
   if (!pool.length) return null
   const mat = pool.map(i => '- ' + i.title + '（' + i.sourceName + '）' + (i.summary ? '：' + i.summary.slice(0, 80) : '')).join('\n')
   let out = ''
-  try { out = await ai(SYS_MARKET + ' 请生成「每日市场动态简报」：先 3-5 条要点综述，再按【政策/技术趋势】【竞品/厂商动态】【其他值得关注】归类点名，最后给售前 1-2 条行动建议。控制在 500 字内。', '今日资讯：\n' + mat, 1200) } catch (e) { out = '（AI 摘要生成失败：' + e.message + '）' }
+  try { out = await ai(SYS_MARKET + ' 请生成「每日市场动态简报」：先 3-5 条要点综述，再按【政策/技术趋势】【竞品/厂商动态】【其他值得关注】归类点名，最后给售前 1-2 条行动建议。控制在 500 字内。', '今日资讯：\n' + mat, 900) } catch (e) { out = '（AI 摘要生成失败：' + e.message + '）' }
   const ex = db.briefs.find(b => b.type === 'digest' && b.title === '每日市场动态 · ' + day)
   const rec = { id: ex ? ex.id : uid('b'), type: 'digest', title: '每日市场动态 · ' + day, output: out, createdAt: Date.now() }
   if (ex) Object.assign(ex, rec); else db.briefs.unshift(rec)
@@ -180,7 +188,7 @@ async function handle(req, res, p) {
       else if (rawText) { text = rawText.slice(0, 6000); title = String(b.title || '').trim() || text.slice(0, 30) }
       else return send(res, 400, { error: '请提供 URL 或原文' })
       if (!text) return send(res, 400, { error: '未提取到正文' })
-      let points = ''; try { points = await ai(SYS_MARKET + ' 请从下面材料中提炼 3-6 条对售前/投标有价值的要点（每条一行，前缀“· ”），并标注类型（政策/竞品/技术/市场）。', '标题：' + title + '\n\n正文：' + text, 800) } catch (e) { points = '（要点提炼失败：' + e.message + '）' }
+      let points = ''; try { points = await ai(SYS_MARKET + ' 请从下面材料中提炼 3-6 条对售前/投标有价值的要点（每条一行，前缀“· ”），并标注类型（政策/竞品/技术/市场）。', '标题：' + title + '\n\n正文：' + text, 600) } catch (e) { points = '（要点提炼失败：' + e.message + '）' }
       const item = { id: uid('i'), sourceId: 'manual', sourceName: url ? '手动抓取' : '手动录入', title: title.slice(0, 200), url: url || '', summary: (b.summary || text).slice(0, 300), points, published: new Date().toISOString().slice(0, 16).replace('T', ' '), publishedTs: Date.now(), fetchedAt: Date.now() }
       db.items.unshift(item); prune(); save(); return send(res, 200, { ok: true, item })
     }
@@ -195,7 +203,7 @@ async function handle(req, res, p) {
       const task = type === 'compare'
         ? '请基于材料生成「竞品对比表」：用 Markdown 表格，行=各竞品/我方，列=关键维度（定位、核心产品、技术能力、价格/报价、优劣势、适配场景等，按材料可得信息），表格后补 3-5 条我方应对要点。材料缺失的维度填“—”，不要编造。'
         : '请基于材料生成一份「行业简报」：小标题分节（政策/环境、技术趋势、竞品与厂商动态、对售前投标的启示），要点式，控制在 600 字内。'
-      try { out = await ai(SYS_MARKET + ' ' + task, mat, 1600) } catch (e) { return send(res, 502, { error: 'AI 整理失败：' + e.message }) }
+      try { out = await ai(SYS_MARKET + ' ' + task, mat, 1100) } catch (e) { return send(res, 502, { error: 'AI 整理失败：' + e.message }) }
       const brief = { id: uid('b'), type, title, output: out, refs: b.itemIds || [], createdAt: Date.now() }
       db.briefs.unshift(brief); prune(); save(); return send(res, 200, { ok: true, brief })
     }
