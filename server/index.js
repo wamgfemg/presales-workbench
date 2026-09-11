@@ -248,7 +248,7 @@ async function handleQaAsk(req, res) {
         'authorization': 'Bearer ' + OPENROUTER_KEY,
         'content-type': 'application/json',
         'http-referer': 'http://49.233.179.30:8088/',
-        'x-title': '售前工作台-智能问答',
+        'x-title': 'Presales Workbench Q&A',
       },
       body: JSON.stringify({
         model,
