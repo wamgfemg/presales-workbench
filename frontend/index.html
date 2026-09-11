@@ -36,7 +36,7 @@
       <div class="side-user" id="sideUser" style="display:none">
         <div class="su-name">👤 <span id="curUser"></span></div>
         <div class="su-warn" id="pwWarn" style="display:none">⚠ 当前为初始密码，建议尽快修改</div>
-        <div class="su-btns"><button id="btnPw" class="btn sm ghost" style="display:none" onclick="openPw()">修改密码</button><button id="btnLogout" class="btn sm ghost" style="display:none" onclick="doLogout()">退出</button></div>
+        <div class="su-btns"><button id="btnPw" class="su-btn" style="display:none" onclick="openPw()"><svg viewBox="0 0 24 24" class="su-ic"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10 13l8-8M15 5l3 3M13 7l2 2"/></svg>修改密码</button><button id="btnLogout" class="su-btn out" style="display:none" onclick="doLogout()"><svg viewBox="0 0 24 24" class="su-ic"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>退出</button></div>
       </div>
       数据存服务器 <span id="syncState" title="业务数据已落库 SQLite；本机浏览器另留一份缓存">●</span>
       <button onclick="exportAll()">⬇ 导出数据备份</button>
