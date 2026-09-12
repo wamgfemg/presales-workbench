@@ -201,9 +201,9 @@ async function handle(req, res, p) {
       const title = String(b.title || '').trim() || (type === 'compare' ? '竞品对比' : '行业简报')
       let out
       const task = type === 'compare'
-        ? '请基于材料生成「竞品对比表」：用 Markdown 表格，行=各竞品/我方，列=关键维度（定位、核心产品、技术能力、价格/报价、优劣势、适配场景等，按材料可得信息），表格后补 3-5 条我方应对要点。材料缺失的维度填“—”，不要编造。'
-        : '请基于材料生成一份「行业简报」：小标题分节（政策/环境、技术趋势、竞品与厂商动态、对售前投标的启示），要点式，控制在 600 字内。'
-      try { out = await ai(SYS_MARKET + ' ' + task, mat, 1100) } catch (e) { return send(res, 502, { error: 'AI 整理失败：' + e.message }) }
+        ? '请输出一份专业的「竞品对比分析报告」，用 Markdown，结构：\n## 核心结论\n（2-3 句概述我方相对位置与关键判断）\n## 对比矩阵\n用表格：首列为对比维度（产品定位、核心功能、技术与架构、信创/合规适配、性能与稳定性、价格/报价、交付与服务、生态与案例、综合优劣势），其余列为我方及各竞品；单元格写要点，材料没有的填“—”，不得编造数字。\n## 我方优势\n（2-4 条）\n## 我方短板与风险\n（2-4 条）\n## 应对与打法建议\n（3-5 条，落到可执行动作）\n## 数据说明\n（一行，说明信息来源与缺口）'
+        : '请输出一份专业的「行业与政策简报」，用 Markdown，结构：\n## 执行摘要\n（3-4 句要点）\n## 政策与监管环境\n## 技术与产品趋势\n## 竞争与厂商动态\n## 对售前投标的启示\n（3-5 条可执行建议）\n## 信息来源\n（列出所依据的条目标题）\n要点式表达，只依据给定材料，缺失的不编造，控制在 700 字内。'
+      try { out = await ai(SYS_MARKET + ' ' + task, mat, 1600) } catch (e) { return send(res, 502, { error: 'AI 整理失败：' + e.message }) }
       const brief = { id: uid('b'), type, title, output: out, refs: b.itemIds || [], createdAt: Date.now() }
       db.briefs.unshift(brief); prune(); save(); return send(res, 200, { ok: true, brief })
     }

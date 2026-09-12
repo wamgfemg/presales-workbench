@@ -584,6 +584,33 @@
     <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mAddUser')">取消</button><button class="btn" style="margin-left:10px" onclick="submitAddUser()">创建</button></div>
   </div></div>
 
+  <!-- ===== 市场情报弹窗 ===== -->
+  <div class="mask" id="mMkSources"><div class="modal" style="width:660px">
+    <h3><span>资讯来源</span><button class="x" onclick="closeMask('mMkSources')">✕</button></h3>
+    <div id="mkSrcBody"></div>
+  </div></div>
+  <div class="mask" id="mMkImport"><div class="modal" style="width:560px">
+    <h3><span>录入资料</span><button class="x" onclick="closeMask('mMkImport')">✕</button></h3>
+    <label class="f"><span>抓取网页正文（文章/政策页 URL）</span><div style="display:flex;gap:8px"><input id="mkImpUrl" placeholder="https://…"><button class="btn" onclick="mkImportUrl()">抓取并提炼</button></div></label>
+    <div class="hint" style="text-align:center;margin:6px 0">— 或粘贴原文 —</div>
+    <label class="f"><span>标题（可空）</span><input id="mkImpTitle" placeholder="不填则自动截取"></label>
+    <label class="f"><span>原文</span><textarea id="mkImpText" rows="4" placeholder="粘贴政策/竞品资料正文，AI 将提炼要点并归档"></textarea></label>
+    <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mMkImport')">关闭</button><button class="btn" style="margin-left:10px" onclick="mkImportText()">提炼要点并归档</button></div>
+  </div></div>
+  <div class="mask" id="mMkGen"><div class="modal" style="width:660px">
+    <h3><span>生成报告</span><button class="x" onclick="closeMask('mMkGen')">✕</button></h3>
+    <div class="hint">勾选近期资讯作为素材（或在下方补充粘贴），选择生成类型。</div>
+    <div class="mk-picks" id="mkGenPicks"></div>
+    <label class="f" style="margin-top:8px"><span>补充素材（可选）</span><textarea id="mkGenText" rows="2" placeholder="额外粘贴竞品参数、政策条款等"></textarea></label>
+    <label class="f"><span>报告标题（可空）</span><input id="mkGenTitle" placeholder="如：机房动环竞品对比"></label>
+    <div class="login-err" id="mkGenErr"></div>
+    <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mMkGen')">取消</button><button class="btn" style="margin-left:8px" onclick="submitMkGen('compare')">🔍 竞品对比表</button><button class="btn" style="margin-left:8px" onclick="submitMkGen('brief')">📊 行业简报</button></div>
+  </div></div>
+  <div class="mask" id="mMkView"><div class="modal mk-view-modal">
+    <h3><span id="mkViewTitle">报告</span><button class="x" onclick="closeMask('mMkView')">✕</button></h3>
+    <div id="mkViewBody" class="mk-view-scroll"></div>
+  </div></div>
+
 <script src="./src/main.js"></script>
   <!-- 向量知识库：接入 WeKnora 真实知识库，覆盖 main.js 中的本地模拟逻辑 -->
   <script src="./src/kb-weknora.js"></script>

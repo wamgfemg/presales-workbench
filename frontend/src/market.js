@@ -1,12 +1,14 @@
-/* ===== 市场情报前端：市场资料整理 Agent + 每日市场动态（依赖 main.js 的 toast/openMask/closeMask，auth.js 的 canEdit/currentRole） ===== */
+/* ===== 市场情报前端：报告清单台账 + 报告详情 + 来源/录入/生成弹窗（依赖 main.js toast/openMask/closeMask，auth.js canEdit/currentRole） ===== */
 (function () {
   var MKT = { sources: [], items: [], briefs: [], stats: {} }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] }) }
   function canEditMarket() { var r = window.currentRole && window.currentRole(); return r === 'admin' || (window.canEdit && window.canEdit('market')) }
   function api(url, opts) { return fetch(url, Object.assign({ headers: { 'content-type': 'application/json' } }, opts || {})).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j } }).catch(function () { return { status: r.status, body: {} } }) }) }
   function dayStr(ts) { return new Date((ts || 0) + 8 * 3600e3).toISOString().slice(0, 10) }
+  function dt(ts) { return new Date(ts).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-') }
+  function refreshMkt() { return api('/api/market').then(function (r) { if (r.status === 200) MKT = r.body; return r }) }
 
-  /* ---- 轻量 Markdown（含表格） ---- */
+  /* ---- 轻量 Markdown（含表格/标题/列表/链接） ---- */
   function inline(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`(.+?)`/g, '<code>$1</code>').replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank">$1</a>') }
   function mkTable(head, rows) {
     function cells(l) { return l.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(function (c) { return c.trim() }) }
@@ -34,54 +36,87 @@
     if (inCode) html += '</pre>'; flush(); return html
   }
 
-  /* ================= 市场情报整理 ================= */
+  /* ================= 市场情报：报告清单 ================= */
   window.renderMarket = function () {
     var el = document.getElementById('marketBody'); if (!el) return
     api('/api/market').then(function (r) {
       if (r.status !== 200) { el.innerHTML = '<div class="card"><div class="empty">加载失败或无权限</div></div>'; return }
-      MKT = r.body; var E = canEditMarket()
-      var srcRows = (MKT.sources || []).map(function (s) {
-        return '<tr><td>' + esc(s.name) + '</td><td class="mk-url">' + esc(s.url) + '</td><td>' + (s.active === false ? '<span class="tag">停用</span>' : '<span class="tag" style="background:#e6f4ea;color:#2f9e44">启用</span>') + '</td>' +
-          (E ? '<td style="white-space:nowrap"><button class="btn sm ghost" onclick="mkToggleSource(\'' + s.id + '\',' + (s.active === false) + ')">' + (s.active === false ? '启用' : '停用') + '</button> <button class="btn sm danger" onclick="mkDelSource(\'' + s.id + '\')">删除</button></td>' : '<td></td>') + '</tr>'
-      }).join('')
-      var briefs = (MKT.briefs || []).filter(function (b) { return b.type !== 'digest' }).map(function (b) {
-        return '<div class="card mk-brief"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">' + (b.type === 'compare' ? '🔍 竞品对比：' : '📊 行业简报：') + esc(b.title) + '</h3>' + (E ? '<button class="btn sm ghost" onclick="mkDelBrief(\'' + b.id + '\')">删除</button>' : '') + '</div><div class="mk-out">' + mkMd(b.output) + '</div><div class="mk-time">' + new Date(b.createdAt).toLocaleString('zh-CN', { hour12: false }) + '</div></div>'
-      }).join('') || '<div class="empty">还没有整理成果。用下方「AI 整理」生成竞品对比表或行业简报。</div>'
-      var recent = (MKT.items || []).slice(0, 25).map(function (it) {
-        return '<label class="mk-pick"><input type="checkbox" value="' + it.id + '"> <b>' + esc(it.title) + '</b><span class="mk-pick-meta">' + esc(it.sourceName) + ' · ' + (it.published || dayStr(it.fetchedAt)) + '</span></label>'
-      }).join('') || '<div class="empty" style="padding:8px">暂无条目，点右上「立即抓取」或到「每日市场动态」查看。</div>'
-
-      el.innerHTML =
-        '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h3 style="margin:0">资讯来源</h3>' + (E ? '<div style="display:flex;gap:8px"><button class="btn sm" id="mkFetchBtn" onclick="mkFetchNow()">⟳ 立即抓取</button><button class="btn sm ghost" onclick="openMkSource()">＋ 添加来源</button></div>' : '') + '</div>' +
-        '<div style="overflow-x:auto"><table><tr><th>名称</th><th>源地址</th><th>状态</th>' + (E ? '<th style="width:150px">操作</th>' : '') + '</tr>' + (srcRows || '<tr><td colspan="4" class="empty">暂无来源</td></tr>') + '</table></div>' +
-        '<div class="hint" style="margin-top:8px">RSS 源每日 08:00 自动抓取。政府政策类站点多无规范 RSS、易被反爬，建议用下方「抓取网页/粘贴原文」补录。</div></div>' +
-        (E ?
-          '<div class="card"><h3>录入资料</h3>' +
-          '<div class="grid g2" style="align-items:end"><label class="f"><span>抓取网页正文（填文章/政策页 URL）</span><div style="display:flex;gap:8px"><input id="mkImpUrl" placeholder="https://…"><button class="btn" onclick="mkImportUrl()">抓取并提炼</button></div></label></div>' +
-          '<label class="f"><span>或直接粘贴原文（政策/竞品资料）</span><input id="mkImpTitle" placeholder="标题（可空）" style="margin-bottom:6px"><textarea id="mkImpText" rows="3" placeholder="粘贴正文，AI 将提炼要点并归档"></textarea></label>' +
-          '<button class="btn ghost" onclick="mkImportText()">提炼要点并归档</button></div>' +
-          '<div class="card"><h3>AI 整理</h3><div class="hint">勾选下方近期条目作为素材（或在补充框粘贴内容），生成竞品对比表 / 行业简报。</div>' +
-          '<div class="mk-picks">' + recent + '</div>' +
-          '<label class="f" style="margin-top:8px"><span>补充素材（可选）</span><textarea id="mkOrgText" rows="2" placeholder="额外粘贴竞品参数、政策条款等"></textarea></label>' +
-          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="mkOrgTitle" placeholder="成果标题（可空）" style="max-width:240px"><button class="btn" onclick="mkOrganize(\'compare\')">🔍 生成竞品对比表</button><button class="btn ghost" onclick="mkOrganize(\'brief\')">📊 生成行业简报</button></div></div>'
-          : '') +
-        '<div class="card"><h3>整理成果</h3>' + briefs + '</div>'
+      MKT = r.body; var E = canEditMarket(); var st = MKT.stats || {}
+      var toolbar = '<div class="mk-toolbar">'
+        + (E ? '<button class="btn sm" id="mkFetchBtn" onclick="mkFetchNow()">⟳ 立即抓取</button><button class="btn sm" onclick="openMkGen()">＋ 生成报告</button><button class="btn sm ghost" onclick="openMkImport()">📥 录入资料</button>' : '')
+        + '<button class="btn sm ghost" onclick="openMkSources()">🔗 资讯来源</button></div>'
+      var head = '<div class="mk-page-head"><div class="mk-stats">共 <b>' + (MKT.items || []).length + '</b> 条资讯 · 上次抓取 ' + (st.lastRun ? dt(st.lastRun) : '从未') + '</div>' + toolbar + '</div>'
+      var reports = (MKT.briefs || []).filter(function (b) { return b.type !== 'digest' })
+      var table
+      if (!reports.length) {
+        table = '<div class="card"><div class="empty">还没有报告。点右上「＋ 生成报告」，勾选近期资讯或粘贴素材，AI 会生成竞品对比表 / 行业简报。<div style="margin-top:12px">' + (E ? '<button class="btn" onclick="openMkGen()">＋ 生成报告</button>' : '') + '</div></div></div>'
+      } else {
+        var rows = reports.map(function (b) {
+          var tag = b.type === 'compare' ? '<span class="mk-badge mk-badge-c">竞品对比</span>' : '<span class="mk-badge mk-badge-b">行业简报</span>'
+          var prev = String(b.output || '').replace(/[#*`>|]/g, ' ').replace(/[-]{2,}/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70)
+          return '<tr class="mk-row" onclick="viewReport(\'' + b.id + '\')">'
+            + '<td class="mk-rt-title"><b>' + esc(b.title) + '</b><div class="mk-rt-prev">' + esc(prev) + '…</div></td>'
+            + '<td>' + tag + '</td>'
+            + '<td class="mk-rt-time">' + dt(b.createdAt) + '</td>'
+            + '<td class="mk-rt-cnt">' + ((b.refs && b.refs.length) || '—') + '</td>'
+            + '<td>' + (E ? '<button class="btn sm ghost" onclick="event.stopPropagation();mkDelBrief(\'' + b.id + '\')">删除</button>' : '') + '</td></tr>'
+        }).join('')
+        table = '<div class="card mk-reports-card"><div style="overflow-x:auto"><table class="mk-reports"><tr><th>报告</th><th style="width:96px">类型</th><th style="width:150px">生成时间</th><th style="width:64px">素材</th><th style="width:72px">操作</th></tr>' + rows + '</table></div></div>'
+      }
+      el.innerHTML = head + table
     })
   }
-  window.mkFetchNow = function () { var b = document.getElementById('mkFetchBtn'); if (b) { b.disabled = true; b.textContent = '抓取中…' } api('/api/market/fetch', { method: 'POST', body: '{}' }).then(function (r) { if (b) { b.disabled = false; b.textContent = '⟳ 立即抓取' } if (r.status === 200) { toast('抓取完成，新增 ' + (r.body.added || 0) + ' 条'); renderMarket() } else toast((r.body && r.body.error) || '抓取失败') }).catch(function () { if (b) { b.disabled = false; b.textContent = '⟳ 立即抓取' } toast('抓取失败') }) }
-  window.openMkSource = function () { var name = prompt('来源名称：'); if (name === null) return; var url = prompt('RSS/Atom 源地址：'); if (!url) return; api('/api/market/source', { method: 'POST', body: JSON.stringify({ name: name, url: url }) }).then(function (r) { if (r.status === 200) { toast('已添加'); renderMarket() } else toast((r.body && r.body.error) || '失败') }) }
-  window.mkToggleSource = function (id, active) { api('/api/market/source/' + id, { method: 'PUT', body: JSON.stringify({ active: !!active }) }).then(function () { renderMarket() }) }
-  window.mkDelSource = function (id) { if (!confirm('删除该来源？')) return; api('/api/market/source/' + id, { method: 'DELETE' }).then(function () { renderMarket() }) }
-  window.mkImportUrl = function () { var u = document.getElementById('mkImpUrl').value.trim(); if (!u) { toast('请输入 URL'); return } toast('抓取中…'); api('/api/market/import', { method: 'POST', body: JSON.stringify({ url: u }) }).then(function (r) { if (r.status === 200) { toast('已提炼归档'); document.getElementById('mkImpUrl').value = ''; renderMarket() } else toast((r.body && r.body.error) || '失败') }) }
-  window.mkImportText = function () { var t = document.getElementById('mkImpText').value.trim(); if (!t) { toast('请粘贴原文'); return } toast('提炼中…'); api('/api/market/import', { method: 'POST', body: JSON.stringify({ title: document.getElementById('mkImpTitle').value.trim(), text: t }) }).then(function (r) { if (r.status === 200) { toast('已提炼归档'); document.getElementById('mkImpText').value = ''; document.getElementById('mkImpTitle').value = ''; renderMarket() } else toast((r.body && r.body.error) || '失败') }) }
-  window.mkOrganize = function (type) {
-    var ids = [].slice.call(document.querySelectorAll('.mk-picks input:checked')).map(function (x) { return x.value })
-    var extra = (document.getElementById('mkOrgText').value || '').trim(); var title = document.getElementById('mkOrgTitle').value.trim()
-    if (!ids.length && !extra) { toast('请勾选条目或粘贴补充素材'); return }
-    toast('AI 整理中，请稍候…')
-    api('/api/market/organize', { method: 'POST', body: JSON.stringify({ type: type, itemIds: ids, text: extra, title: title }) }).then(function (r) { if (r.status === 200) { toast('已生成'); renderMarket() } else toast((r.body && r.body.error) || '整理失败') }).catch(function () { toast('整理失败') })
+
+  /* ---- 报告详情 ---- */
+  window.viewReport = function (id) {
+    var b = (MKT.briefs || []).find(function (x) { return x.id === id }); if (!b) return
+    document.getElementById('mkViewTitle').textContent = b.type === 'compare' ? '竞品对比报告' : '行业简报'
+    var refs = (b.refs && b.refs.length) ? ('<span>基于 ' + b.refs.length + ' 条素材</span>') : ''
+    document.getElementById('mkViewBody').innerHTML = '<div class="mk-report">'
+      + '<div class="mk-report-head"><span class="mk-report-kicker">' + (b.type === 'compare' ? '竞品对比分析' : '行业 · 政策简报') + '</span><h2>' + esc(b.title) + '</h2>'
+      + '<div class="mk-report-meta"><span>' + dt(b.createdAt) + '</span>' + refs + '<span>AI 整理，供参考</span></div></div>'
+      + '<div class="mk-report-body">' + mkMd(b.output) + '</div></div>'
+    openMask('mMkView')
   }
-  window.mkDelBrief = function (id) { if (!confirm('删除该成果？')) return; api('/api/market/brief/' + id, { method: 'DELETE' }).then(function () { renderMarket() }) }
+
+  /* ---- 抓取 ---- */
+  window.mkFetchNow = function () { var b = document.getElementById('mkFetchBtn'); if (b) { b.disabled = true; b.textContent = '抓取中…' } api('/api/market/fetch', { method: 'POST', body: '{}' }).then(function (r) { if (b) { b.disabled = false; b.textContent = '⟳ 立即抓取' } if (r.status === 200) { toast('抓取完成，新增 ' + (r.body.added || 0) + ' 条'); renderMarket() } else toast((r.body && r.body.error) || '抓取失败') }).catch(function () { if (b) { b.disabled = false; b.textContent = '⟳ 立即抓取' } toast('抓取失败') }) }
+
+  /* ---- 资讯来源（弹窗） ---- */
+  function renderSourcesModal() {
+    var rows = (MKT.sources || []).map(function (s) {
+      return '<tr><td>' + esc(s.name) + '</td><td class="mk-url">' + esc(s.url) + '</td><td>' + (s.active === false ? '<span class="tag">停用</span>' : '<span class="tag" style="background:#e6f4ea;color:#2f9e44">启用</span>') + '</td>'
+        + '<td style="white-space:nowrap"><button class="btn sm ghost" onclick="mkToggleSource(\'' + s.id + '\',' + (s.active === false) + ')">' + (s.active === false ? '启用' : '停用') + '</button> <button class="btn sm danger" onclick="mkDelSource(\'' + s.id + '\')">删除</button></td></tr>'
+    }).join('')
+    document.getElementById('mkSrcBody').innerHTML = '<div style="overflow-x:auto"><table><tr><th>名称</th><th>源地址</th><th>状态</th><th style="width:150px">操作</th></tr>' + (rows || '<tr><td colspan="4" class="empty">暂无来源</td></tr>') + '</table></div>'
+      + '<div class="mk-src-add"><input id="msName" placeholder="来源名称"><input id="msUrl" placeholder="RSS/Atom 地址 https://…"><button class="btn sm" onclick="addMkSource()">＋ 添加</button></div>'
+      + '<div class="hint" style="margin-top:10px">政府政策类站点多无规范 RSS、易被反爬，建议用「录入资料」粘贴 URL 或原文补录。每日 08:00 自动抓取启用中的源。</div>'
+  }
+  window.openMkSources = function () { refreshMkt().then(renderSourcesModal); openMask('mMkSources') }
+  window.addMkSource = function () { var name = document.getElementById('msName').value.trim(), url = document.getElementById('msUrl').value.trim(); if (!url) { toast('请输入源地址'); return } api('/api/market/source', { method: 'POST', body: JSON.stringify({ name: name, url: url }) }).then(function (r) { if (r.status === 200) { toast('已添加'); refreshMkt().then(renderSourcesModal) } else toast((r.body && r.body.error) || '失败') }) }
+  window.mkToggleSource = function (id, active) { api('/api/market/source/' + id, { method: 'PUT', body: JSON.stringify({ active: !!active }) }).then(function () { refreshMkt().then(renderSourcesModal) }) }
+  window.mkDelSource = function (id) { if (!confirm('删除该来源？')) return; api('/api/market/source/' + id, { method: 'DELETE' }).then(function () { refreshMkt().then(renderSourcesModal) }) }
+
+  /* ---- 录入资料（弹窗） ---- */
+  window.openMkImport = function () { ['mkImpUrl', 'mkImpTitle', 'mkImpText'].forEach(function (i) { var e = document.getElementById(i); if (e) e.value = '' }); openMask('mMkImport') }
+  window.mkImportUrl = function () { var u = document.getElementById('mkImpUrl').value.trim(); if (!u) { toast('请输入 URL'); return } toast('抓取中…'); api('/api/market/import', { method: 'POST', body: JSON.stringify({ url: u }) }).then(function (r) { if (r.status === 200) { toast('已提炼归档'); closeMask('mMkImport'); renderMarket() } else toast((r.body && r.body.error) || '失败') }) }
+  window.mkImportText = function () { var t = document.getElementById('mkImpText').value.trim(); if (!t) { toast('请粘贴原文'); return } toast('提炼中…'); api('/api/market/import', { method: 'POST', body: JSON.stringify({ title: document.getElementById('mkImpTitle').value.trim(), text: t }) }).then(function (r) { if (r.status === 200) { toast('已提炼归档'); closeMask('mMkImport'); renderMarket() } else toast((r.body && r.body.error) || '失败') }) }
+
+  /* ---- 生成报告（弹窗） ---- */
+  window.openMkGen = function () {
+    var recent = (MKT.items || []).slice(0, 30).map(function (it) { return '<label class="mk-pick"><input type="checkbox" value="' + it.id + '"> <b>' + esc(it.title) + '</b><span class="mk-pick-meta">' + esc(it.sourceName) + ' · ' + (it.published || dayStr(it.fetchedAt)) + '</span></label>' }).join('')
+    document.getElementById('mkGenPicks').innerHTML = recent || '<div class="empty" style="padding:10px">暂无资讯条目，可只在下方粘贴素材生成</div>'
+    document.getElementById('mkGenText').value = ''; document.getElementById('mkGenTitle').value = ''; document.getElementById('mkGenErr').textContent = ''
+    openMask('mMkGen')
+  }
+  window.submitMkGen = function (type) {
+    var ids = [].slice.call(document.querySelectorAll('#mkGenPicks input:checked')).map(function (x) { return x.value })
+    var extra = (document.getElementById('mkGenText').value || '').trim(), title = document.getElementById('mkGenTitle').value.trim(), err = document.getElementById('mkGenErr'); err.textContent = ''
+    if (!ids.length && !extra) { err.textContent = '请勾选条目或粘贴补充素材'; return }
+    var btns = document.querySelectorAll('#mMkGen button'); btns.forEach(function (b) { b.disabled = true }); toast('AI 整理中，约需 1 分钟…')
+    api('/api/market/organize', { method: 'POST', body: JSON.stringify({ type: type, itemIds: ids, text: extra, title: title }) }).then(function (r) { btns.forEach(function (b) { b.disabled = false }); if (r.status === 200) { closeMask('mMkGen'); toast('报告已生成'); renderMarket() } else err.textContent = (r.body && r.body.error) || '整理失败' }).catch(function () { btns.forEach(function (b) { b.disabled = false }); err.textContent = '整理失败' })
+  }
+  window.mkDelBrief = function (id) { if (!confirm('删除该报告？')) return; api('/api/market/brief/' + id, { method: 'DELETE' }).then(function () { renderMarket() }) }
 
   /* ================= 每日市场动态 ================= */
   window.renderMarketDaily = function () {
@@ -90,9 +125,8 @@
       if (r.status !== 200) { el.innerHTML = '<div class="card"><div class="empty">加载失败或无权限</div></div>'; return }
       MKT = r.body; var E = canEditMarket()
       var digest = (MKT.briefs || []).filter(function (b) { return b.type === 'digest' }).slice(0, 1)[0]
-      var digestHtml = digest ? '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">📰 ' + esc(digest.title) + '</h3>' + (E ? '<button class="btn sm ghost" onclick="mkDigestNow()">重新生成</button>' : '') + '</div><div class="mk-out">' + mkMd(digest.output) + '</div></div>'
+      var digestHtml = digest ? '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">📰 ' + esc(digest.title) + '</h3>' + (E ? '<button class="btn sm ghost" onclick="mkDigestNow()">重新生成</button>' : '') + '</div><div class="mk-report-body">' + mkMd(digest.output) + '</div></div>'
         : '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">📰 今日动态摘要</h3>' + (E ? '<button class="btn sm" onclick="mkDigestNow()">生成今日摘要</button>' : '') + '</div><div class="empty" style="padding:14px">尚未生成。系统每日 08:00 自动抓取并生成，也可手动点「生成」。</div></div>'
-      // 按天分组
       var groups = {}, order = []
       ;(MKT.items || []).forEach(function (it) { var d = dayStr(it.publishedTs || it.fetchedAt); if (!groups[d]) { groups[d] = []; order.push(d) } groups[d].push(it) })
       var body = order.slice(0, 30).map(function (d) {

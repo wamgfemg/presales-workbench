@@ -405,3 +405,35 @@ body.auth-pending #app{display:none!important}
 .mk-item-m{font-size:11.5px;color:var(--sub);margin:3px 0}
 .mk-item-s{font-size:12.5px;color:#414a5f}
 .mk-item-p{font-size:12.5px;color:#3a4358;background:#f8fafd;border-radius:8px;padding:8px 10px;margin-top:6px}
+
+/* ===== 市场情报：报告清单与详情 ===== */
+.mk-page-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.mk-stats{font-size:12.5px;color:var(--sub)}
+.mk-toolbar{display:flex;gap:8px;flex-wrap:wrap}
+.mk-reports-card{padding:0;overflow:hidden}
+.mk-reports{width:100%;min-width:640px}
+.mk-row{cursor:pointer}
+.mk-row:hover td{background:#f5f8ff}
+.mk-rt-title b{font-size:13.5px}
+.mk-rt-prev{font-size:11.5px;color:var(--sub);margin-top:2px;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mk-rt-time,.mk-rt-cnt{font-size:12px;color:var(--sub);white-space:nowrap}
+.mk-badge{display:inline-block;font-size:11px;padding:2px 9px;border-radius:20px;white-space:nowrap}
+.mk-badge-c{background:#eef3fd;color:#1c5ed8}
+.mk-badge-b{background:#f1e9ff;color:#6d33c9}
+.mk-src-add{display:flex;gap:8px;margin-top:12px}
+.mk-src-add input{flex:1}
+.mk-view-modal{width:820px;max-width:96vw}
+.mk-view-scroll{max-height:70vh;overflow:auto}
+.mk-report-head{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px}
+.mk-report-kicker{font-size:12px;font-weight:700;color:var(--brand);letter-spacing:.5px}
+.mk-report-head h2{font-size:20px;margin:6px 0 8px}
+.mk-report-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
+.mk-report-body{font-size:14px;line-height:1.85;color:#26303f}
+.mk-report-body h2{font-size:16px;margin:18px 0 8px;padding-left:9px;border-left:4px solid var(--brand)}
+.mk-report-body h3{font-size:14.5px;margin:14px 0 6px}
+.mk-report-body h4{font-size:13.5px;margin:12px 0 4px;color:var(--brand)}
+.mk-report-body p{margin:8px 0}
+.mk-report-body .mk-li{margin:5px 0}
+.mk-report-body .mk-table{font-size:13px}
+.mk-report-body .mk-table th{background:var(--grad);color:#fff;border-color:#c9d4f5}
+.mk-report-body .mk-table tr:nth-child(even) td{background:#f8faff}
