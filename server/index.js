@@ -20,6 +20,7 @@ const { extractText } = require('./extract.js')
 const { createTask, getTask, findRunning, stats: taskStats } = require('./async-task.js')
 const auth = require('./auth.js')
 const market = require('./market.js')
+const aidaily = require('./aidaily.js')
 
 const PORT = Number(process.env.PORT || 8088)
 const HOST = process.env.BIND_HOST || '0.0.0.0'
@@ -834,6 +835,7 @@ const server = http.createServer(async (req, res) => {
       }
     }
     if (url.startsWith('/api/market')) return void (await market.handle(req, res, url.split('?')[0]))
+    if (url.startsWith('/api/aidaily')) return void (await aidaily.handle(req, res, url.split('?')[0]))
     if (url === '/api/chat' && req.method === 'POST') return void (await handleChat(req, res))
     if (url === '/api/qa/ask' && req.method === 'POST') return void (await handleQaAsk(req, res))
     if (url.startsWith('/api/chat/poll/') && req.method === 'GET') {
@@ -946,6 +948,8 @@ auth.init({ DATA_DIR, log })
 auth.ensureBootstrap()
 market.init({ DATA_DIR, log })
 market.startScheduler()
+aidaily.init({ DATA_DIR, log })
+aidaily.startScheduler()
 
 server.listen(PORT, HOST, () => {
   log(`售前工作台 BFF 已启动  http://${HOST}:${PORT}`)

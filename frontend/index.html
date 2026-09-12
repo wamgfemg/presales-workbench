@@ -27,6 +27,7 @@
       <button data-p="compintel"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2"/><path d="M20 20l-4.4-4.4"/></svg></span>竞争情报</button>
       <button data-p="market"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.8 2.6 15.4 0 18M12 3c-2.6 2.8-2.6 15.4 0 18"/></svg></span>市场情报</button>
       <button data-p="marketdaily"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4M7.5 13h5M7.5 16.5h8"/></svg></span>每日市场动态</button>
+      <button data-p="aidaily"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h13v14H6a2 2 0 0 1-2-2z"/><path d="M17 8h3v9a2 2 0 0 1-2 2M7 9h7M7 12h7M7 15h4"/></svg></span>AI应用日报</button>
       <button data-p="docs"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L18.5 9.5l-4-4L4 16z"/><path d="M13.5 5.5l4 4"/></svg></span>方案制作中心</button>
       <!-- 需求管理入口已按需求隐藏（保留 DOM 与逻辑，去掉下一行的 style 即可恢复） -->
       <button data-p="requirements" style="display:none"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6l1 1 1.8-2M4.5 11.5l1 1 1.8-2M4.5 17l1 1 1.8-2"/></svg></span>需求管理</button>
@@ -308,6 +309,12 @@
     <section class="page" id="p-marketdaily">
       <div class="page-head"><div><h2>每日市场动态</h2><div class="desc">每日自动抓取的资讯与 AI 当日摘要，按天归档（保留最近 90 天）</div></div></div>
       <div id="marketDailyBody"></div>
+    </section>
+
+    <!-- ============ AI应用日报 ============ -->
+    <section class="page" id="p-aidaily">
+      <div class="page-head"><div><h2>AI应用日报</h2><div class="desc">收录「静言波语」等公众号发布的《企业级AI应用日报》，AI 自动整理成结构化日报并归档展示</div></div></div>
+      <div id="aidailyBody"></div>
     </section>
 
     <!-- ============ 报价管理 ============ -->
@@ -611,6 +618,23 @@
     <div id="mkViewBody" class="mk-view-scroll"></div>
   </div></div>
 
+  <!-- ===== AI应用日报弹窗 ===== -->
+  <div class="mask" id="mAdView"><div class="modal mk-view-modal">
+    <h3><span id="adViewTitle">AI 应用日报</span><button class="x" onclick="closeMask('mAdView')">✕</button></h3>
+    <div id="adViewBody" class="mk-view-scroll"></div>
+  </div></div>
+  <div class="mask" id="mAdLink"><div class="modal" style="width:560px">
+    <h3><span>收录日报</span><button class="x" onclick="closeMask('mAdLink')">✕</button></h3>
+    <label class="f"><span>粘贴「静言波语」最新《企业级AI应用日报》文章链接</span><input id="adLinkUrl" placeholder="https://mp.weixin.qq.com/s/…"></label>
+    <div class="hint">抓取正文后由 AI 整理成结构化日报并归档（约需 1 分钟）。同一链接重复收录会自动跳过。</div>
+    <div class="login-err" id="adLinkErr"></div>
+    <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mAdLink')">取消</button><button class="btn" style="margin-left:10px" onclick="submitAdLink()">收录并整理</button></div>
+  </div></div>
+  <div class="mask" id="mAdLinks"><div class="modal" style="width:640px">
+    <h3><span>链接管理</span><button class="x" onclick="closeMask('mAdLinks')">✕</button></h3>
+    <div id="adLinksBody"></div>
+  </div></div>
+
 <script src="./src/main.js"></script>
   <!-- 向量知识库：接入 WeKnora 真实知识库，覆盖 main.js 中的本地模拟逻辑 -->
   <script src="./src/kb-weknora.js"></script>
@@ -619,5 +643,6 @@
 <script src="./src/bid-agent.js"></script>
 <script src="./src/auth.js"></script>
 <script src="./src/market.js"></script>
+<script src="./src/aidaily.js"></script>
 </body>
 </html>

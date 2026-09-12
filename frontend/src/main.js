@@ -127,6 +127,7 @@ function show(p){
   if(p==='users'&&window.renderUsers)renderUsers();
   if(p==='market'&&window.renderMarket)renderMarket();
   if(p==='marketdaily'&&window.renderMarketDaily)renderMarketDaily();
+  if(p==='aidaily'&&window.renderAidaily)renderAidaily();
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-p]');if(b)show(b.dataset.p)});
 function closeMask(id){document.getElementById(id).classList.remove('on')}

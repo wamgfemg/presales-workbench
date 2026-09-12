@@ -437,3 +437,4 @@ body.auth-pending #app{display:none!important}
 .mk-report-body .mk-table{font-size:13px}
 .mk-report-body .mk-table th{background:var(--grad);color:#fff;border-color:#c9d4f5}
 .mk-report-body .mk-table tr:nth-child(even) td{background:#f8faff}
+.mk-src{color:var(--brand);text-decoration:none;font-size:12px}.mk-src:hover{text-decoration:underline}
