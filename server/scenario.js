@@ -16,9 +16,9 @@ const OR_MODEL = process.env.OPENROUTER_MODEL || 'deepseek/deepseek-chat'
 
 let DATA_DIR, LOG, FILE, db = null
 const DEFAULT_SOURCES = [
+  { name: '量子位', url: 'https://www.qbitai.com/feed' },
+  { name: '雷峰网', url: 'https://www.leiphone.com/feed' },
   { name: 'InfoQ 中文', url: 'https://www.infoq.cn/feed' },
-  { name: '极客公园', url: 'https://www.geekpark.net/rss' },
-  { name: '钛媒体', url: 'https://www.tmtpost.com/rss.xml' },
 ]
 
 function init(opts) { DATA_DIR = opts.DATA_DIR; LOG = opts.log || function () {}; FILE = path.join(DATA_DIR, 'scenario.json'); load() }
@@ -83,9 +83,17 @@ async function ai(system, user, maxTokens) {
   } catch (e) { if (e && (e.name === 'AbortError' || /abort/i.test(String(e && e.message)))) throw new Error('AI 提炼超时，请稍后重试'); throw e } finally { clearTimeout(to) }
 }
 const SYS = '你是售前解决方案专家。用中文、专业简洁、只依据给定材料提炼，不编造。输出用轻量 Markdown。'
-const CARD_TASK = '请从材料中提炼一个「软件解决方案 · 创新场景卡」，用 Markdown，结构：\n## 场景名称\n## 所属行业 / 客户类型\n## 业务痛点\n## 解决方案概述\n## 关键技术与产品\n## 落地效果 / 量化收益\n## 对我方方案的借鉴点\n（2-4 条可复用、可写进投标/方案的要点）\n## 来源\n只依据材料，缺失的填"—"，不编造，控制在 500 字内。'
+const CARD_TASK = '请从材料中提炼一个「企业 AI 落地场景卡」——只聚焦企业级 AI 的具体落地应用（不是泛泛行业新闻）。用 Markdown，结构：\n## 场景名称\n## 行业 / 客户类型\n## 业务问题（AI 要解决的具体痛点）\n## AI 能力与模型（用了什么大模型 / Agent / RAG / 多模态等）\n## 数据与系统集成\n## 落地方式与技术栈\n## 效果与量化收益\n## 对我方方案的借鉴点\n（2-4 条可复用、可写进投标/方案的要点）\n## 来源\n若材料并非企业 AI 落地场景，请在“场景名称”下直接写“非企业 AI 落地场景”并停止编造；缺失信息填"—"。只依据材料，控制在 500 字内。'
 
-async function runFetch() { const seen = new Set(db.items.map(i => i.url).filter(Boolean)); let added = 0; for (const s of db.sources.filter(x => x.active !== false)) { try { const res = await fetchUrl(s.url); if (!res.buf || res.status >= 400) continue; const xml = res.buf.toString('utf8'); if (!/<(rss|feed)/i.test(xml.slice(0, 500))) continue; for (const it of parseFeed(xml)) { if (!it.url || seen.has(it.url)) continue; seen.add(it.url); added++; db.items.unshift({ id: uid('i'), sourceName: s.name, title: it.title, url: it.url, summary: it.summary, published: it.published, publishedTs: it.publishedTs, fetchedAt: Date.now() }) } } catch (e) { LOG('scenario 源失败 ' + s.name + '：' + e.message) } } prune(); db.lastRun = Date.now(); save(); return { added, total: db.items.length } }
+const AI_KW_CN = ['人工智能', '大模型', '生成式', '智能体', '机器学习', '深度学习', '多模态', '文生图', '文生视频', '数字人', '智能问答', '知识库', '行业模型', '企业级', '落地场景', '落地应用', '赋能', 'AIGC', 'RAG', 'Agent', 'Copilot', 'LLM', 'GPT', 'Transformer', 'NLP', 'MLOps', '向量', '微调', '推理', '算力']
+function isRelevant(text) {
+  const t = String(text || ''); const low = t.toLowerCase()
+  if (/AI/.test(t)) return true
+  for (const k of AI_KW_CN) { if (t.indexOf(k) >= 0) return true }
+  for (const k of ['llm', 'aigc', 'agent', 'rag', 'copilot', 'gpt', 'nlp', 'mlops', 'transformer', 'chatgpt']) { if (low.indexOf(k) >= 0) return true }
+  return false
+}
+async function runFetch() { const seen = new Set(db.items.map(i => i.url).filter(Boolean)); let added = 0; for (const s of db.sources.filter(x => x.active !== false)) { try { const res = await fetchUrl(s.url); if (!res.buf || res.status >= 400) continue; const xml = res.buf.toString('utf8'); if (!/<(rss|feed)/i.test(xml.slice(0, 500))) continue; for (const it of parseFeed(xml)) { if (!it.url || seen.has(it.url) || !isRelevant(it.title + ' ' + (it.summary || ''))) continue; seen.add(it.url); added++; db.items.unshift({ id: uid('i'), sourceName: s.name, title: it.title, url: it.url, summary: it.summary, published: it.published, publishedTs: it.publishedTs, fetchedAt: Date.now() }) } } catch (e) { LOG('scenario 源失败 ' + s.name + '：' + e.message) } } prune(); db.lastRun = Date.now(); save(); return { added, total: db.items.length } }
 let _running = false
 async function dailyTick() { const now = new Date(Date.now() + 8 * 3600e3); if (now.getUTCHours() < 9 || (now.getUTCHours() === 9 && now.getUTCMinutes() < 15)) return; const day = now.toISOString().slice(0, 10); if (new Date(db.lastRun + 8 * 3600e3).toISOString().slice(0, 10) === day) return; if (_running) return; _running = true; try { const r = await runFetch(); LOG('创新场景：每日抓取完成，新增 ' + r.added) } catch (e) { LOG('创新场景定时异常：' + e.message) } finally { _running = false } }
 function startScheduler() { setInterval(() => { dailyTick().catch(() => {}) }, 30 * 60 * 1000); setTimeout(() => dailyTick().catch(() => {}), 14000) }
