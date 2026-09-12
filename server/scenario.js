@@ -85,7 +85,7 @@ async function ai(system, user, maxTokens) {
 const SYS = '你是售前解决方案专家。用中文、专业简洁、只依据给定材料提炼，不编造。输出用轻量 Markdown。'
 const CARD_TASK = '请从材料中提炼一个「企业 AI 落地场景卡」——只聚焦企业级 AI 的具体落地应用（不是泛泛行业新闻）。用 Markdown，结构：\n## 场景名称\n## 行业 / 客户类型\n## 业务问题（AI 要解决的具体痛点）\n## AI 能力与模型（用了什么大模型 / Agent / RAG / 多模态等）\n## 数据与系统集成\n## 落地方式与技术栈\n## 效果与量化收益\n## 对我方方案的借鉴点\n（2-4 条可复用、可写进投标/方案的要点）\n## 来源\n若材料并非企业 AI 落地场景，请在“场景名称”下直接写“非企业 AI 落地场景”并停止编造；缺失信息填"—"。只依据材料，控制在 500 字内。'
 
-const AI_KW_CN = ['人工智能', '大模型', '生成式', '智能体', '机器学习', '深度学习', '多模态', '文生图', '文生视频', '数字人', '智能问答', '知识库', '行业模型', '企业级', '落地场景', '落地应用', '赋能', 'AIGC', 'RAG', 'Agent', 'Copilot', 'LLM', 'GPT', 'Transformer', 'NLP', 'MLOps', '向量', '微调', '推理', '算力']
+const AI_KW_CN = ['人工智能', '大模型', '生成式', '智能体', '机器学习', '深度学习', '多模态', '文生图', '文生视频', '数字人', '智能问答', '知识库', '行业模型', '企业级', '落地场景', '落地应用', '赋能', 'AIGC', 'RAG', 'Agent', 'Copilot', 'LLM', 'GPT', 'Transformer', 'NLP', 'MLOps', '向量', '微调', '推理', '算力', 'DeepSeek', 'Kimi', '豆包', '通义', '文心', 'Qwen', 'Claude', 'Gemini', 'OpenAI', 'Anthropic', '智谱', '具身智能', '世界模型']
 function isRelevant(text) {
   const t = String(text || ''); const low = t.toLowerCase()
   if (/AI/.test(t)) return true
