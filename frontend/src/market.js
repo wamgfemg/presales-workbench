@@ -118,26 +118,149 @@
   }
   window.mkDelBrief = function (id) { if (!confirm('删除该报告？')) return; api('/api/market/brief/' + id, { method: 'DELETE' }).then(function () { renderMarket() }) }
 
+  /* ================= 竞品图谱（存库：store.competitors → SQLite /api/state） ================= */
+  var CMP_CATS={apm:'IT运维监控 / APM',dcim:'DCIM / 机房动环',bi:'BI / 数据分析',cloud:'云原生 / 超融合',svc:'IT服务 / 运维原厂与第三方'};
+  var CMP_SEED={vendors:[
+    {name:'听云（基调听云）',category:'apm',aliases:'基调网络;TingYun',description:'北京基调网络股份有限公司，应用性能管理（APM）与用户体验监控。'},
+    {name:'云智慧',category:'apm',aliases:'Cloudwise',description:'AIOps 智能运维、监控与 ITSM 平台；2021 年全资并购卓益达。'},
+    {name:'博睿数据',category:'apm',aliases:'Bonree;北京博睿宏远数据科技',description:'北京博睿宏远数据科技股份有限公司，APM 与数字体验监测。'},
+    {name:'日志易',category:'apm',aliases:'北京优特捷',description:'北京优特捷信息技术有限公司，日志大数据分析平台。'},
+    {name:'彩讯科技（RichAPM）',category:'apm',aliases:'RichAPM',description:'服务器/移动应用/网络流量/应用程序/网站/邮箱质量/中间件 七大监控产品，已实现平台一体化集中监控。'},
+    {name:'新炬网络',category:'apm',aliases:'SIOPS;新炬',description:'自研 SIOPS 智慧运维、APM、DPM 数据库性能、SQL 审核、IVORY 日志分析、DAMS 数据资产、GDEVOPS 敏捷交付等产品矩阵。'},
+    {name:'嘉为蓝鲸 / 嘉为科技',category:'apm',aliases:'蓝鲸;腾讯蓝鲸智云',description:'腾讯蓝鲸智云全国首家授权技术合作伙伴，拥有 IT 自动化运维、IT 基础架构服务、应用软件开发、云计算四大业务系列。'},
+    {name:'网强',category:'apm',aliases:'',description:'网络管理与运维监控厂商。'},
+    {name:'擎创科技',category:'apm',aliases:'',description:'AIOps 智能运维。'},
+    {name:'科来',category:'apm',aliases:'Colasoft',description:'网络性能管理与流量分析。'},
+    {name:'天旦',category:'apm',aliases:'上海天旦网络',description:'上海天旦网络科技（2005 年成立），业务与网络性能管理，聚焦关键业务保障、交易分析、大数据采集挖掘。'},
+    {name:'OneAPM（蓝海讯通）',category:'apm',aliases:'北京蓝海讯通',description:'北京蓝海讯通科技股份有限公司，端到端 APM 应用性能管理与监控解决方案。'},
+    {name:'广通信达',category:'apm',aliases:'',description:'在数据中心、互联网、物联网三大领域提供敏捷运维工具与服务。'},
+    {name:'中亦科技',category:'apm',aliases:'',description:'IT 运维服务与监控。'},
+    {name:'神州泰岳',category:'apm',aliases:'',description:'统一运维管理（入选统一运维软件 TOP10）。'},
+    {name:'新华三 U-Center',category:'apm',aliases:'H3C;新华三',description:'U-Center 统一运维平台（统一运维软件 TOP10）。'},
+    {name:'微福思',category:'apm',aliases:'',description:'统一运维软件 TOP10 厂商。'},
+    {name:'SolarWinds',category:'apm',aliases:'',description:'国际 IT 运维监控厂商（统一运维 TOP10）。'},
+    {name:'IBM',category:'apm',aliases:'',description:'ITOM / 运维管理（统一运维 TOP10）。'},
+    {name:'爱狄特',category:'apm',aliases:'ADT',description:'IT 运维管理领域厂商。'},
+    {name:'摩卡',category:'apm',aliases:'摩卡软件',description:'IT 运维管理领域厂商。'},
+    {name:'广州轻维',category:'apm',aliases:'',description:'IT 运维管理领域厂商。'},
+    {name:'华青融天',category:'apm',aliases:'',description:'IT 运维管理领域厂商。'},
+    {name:'百泉众合',category:'apm',aliases:'',description:'IT 运维管理领域厂商。'},
+    {name:'久其智通',category:'apm',aliases:'',description:'IT 运维管理领域厂商。'},
+    {name:'北塔',category:'apm',aliases:'',description:'IT 运维管理领域厂商。'},
+    {name:'大讯永新',category:'apm',aliases:'',description:'IT 运维管理领域厂商。'},
+    {name:'思福迪',category:'apm',aliases:'',description:'IT 运维管理领域厂商（日志/安全）。'},
+    {name:'台湾精诚',category:'apm',aliases:'',description:'IT 运维管理领域厂商。'},
+    {name:'华夏威科',category:'apm',aliases:'',description:'IT 运维管理领域厂商。'},
+    {name:'北明',category:'apm',aliases:'',description:'IT 运维管理领域厂商。'},
+    {name:'共济科技',category:'dcim',aliases:'共济',description:'机房动环监控 / DCIM。'},
+    {name:'维谛 Vertiv',category:'dcim',aliases:'艾默生网络能源',description:'数据中心基础设施与动环。'},
+    {name:'施耐德电气',category:'dcim',aliases:'Schneider;EcoStruxure',description:'数据中心基础设施管理 DCIM。'},
+    {name:'华为（DCIM）',category:'dcim',aliases:'',description:'数据中心基础设施与智能运维。'},
+    {name:'金鹏正',category:'dcim',aliases:'',description:'机房动环监控厂商。'},
+    {name:'卓益达',category:'dcim',aliases:'',description:'动环监控厂商，2021 年被云智慧全资并购。'},
+    {name:'龙控',category:'dcim',aliases:'',description:'机房动环监控厂商。'},
+    {name:'博创',category:'dcim',aliases:'',description:'机房动环监控厂商。'},
+    {name:'中兴力维',category:'dcim',aliases:'',description:'机房动力环境监控。'},
+    {name:'ABB',category:'dcim',aliases:'',description:'数据中心配电与基础设施。'},
+    {name:'天河（天河电子）',category:'dcim',aliases:'',description:'机房动环监控厂商。'},
+    {name:'深圳计通智能',category:'dcim',aliases:'计通',description:'机房动环 / 智慧机房。'},
+    {name:'吉黄',category:'dcim',aliases:'',description:'机房动环监控厂商。'},
+    {name:'格栅',category:'dcim',aliases:'',description:'机房动环监控厂商。'},
+    {name:'CA',category:'dcim',aliases:'',description:'运维监控厂商。'},
+    {name:'东软',category:'dcim',aliases:'Neusoft',description:'IT 解决方案与运维。'},
+    {name:'派诺',category:'dcim',aliases:'',description:'电力/动环监控。'},
+    {name:'西门子',category:'dcim',aliases:'Siemens',description:'数据中心基础设施。'},
+    {name:'康普',category:'dcim',aliases:'CommScope',description:'数据中心物理基础设施/布线。'},
+    {name:'浪潮',category:'dcim',aliases:'Inspur',description:'数据中心基础设施与算力。'},
+    {name:'英维克',category:'dcim',aliases:'Envicool',description:'数据中心温控/精密制冷。'},
+    {name:'亿信华辰',category:'bi',aliases:'',description:'BI 与数据分析。'},
+    {name:'永洪科技',category:'bi',aliases:'Yonghong',description:'BI 与大数据分析。'},
+    {name:'帆软',category:'bi',aliases:'FineReport;FineBI',description:'报表与 BI 龙头。'},
+    {name:'SmartBI',category:'bi',aliases:'思迈特',description:'BI 与数据分析。'},
+    {name:'灵雀云',category:'cloud',aliases:'Alauda',description:'容器云 / 云原生平台。'},
+    {name:'博云',category:'cloud',aliases:'BoCloud',description:'云原生 / 超融合与运维。'},
+    {name:'联想',category:'svc',aliases:'Lenovo',description:'IT 运维原厂服务商之一。'},
+    {name:'软通动力',category:'svc',aliases:'iSoftStone',description:'IT 服务外包与运维。'},
+    {name:'神州数码',category:'svc',aliases:'',description:'IT 分销与服务。'},
+    {name:'亚信科技',category:'svc',aliases:'AsiaInfo',description:'电信软件与运维。'},
+    {name:'东华软件',category:'svc',aliases:'东华',description:'系统集成与运维服务。'},
+    {name:'浙大网新',category:'svc',aliases:'',description:'IT 服务与运维。'},
+    {name:'银信科技',category:'svc',aliases:'',description:'第三方 IT 运维服务代表厂商。'},
+    {name:'海量数据',category:'svc',aliases:'',description:'数据库与第三方运维服务。'},
+    {name:'天玑科技',category:'svc',aliases:'',description:'第三方 IT 运维服务代表厂商。'}
+  ],facts:[
+    {id:'f_seed1',vendor:'云智慧',category:'apm',date:'2021-06-01',title:'云智慧全资并购卓益达',summary:'云智慧完成对动环监控厂商卓益达的全资并购，补齐 DCIM / 机房动环能力，向一体化智能运维平台延伸。',source:'公开资料'},
+    {id:'f_seed2',vendor:'行业格局',category:'apm',date:'2026-09-12',title:'统一运维软件市场 TOP10',summary:'统一运维软件 TOP10：新华三（U-Center）、华为、IBM、SolarWinds、博睿、科来、云智慧、神州泰岳、微福思、听云。',source:'行业榜单'},
+    {id:'f_seed3',vendor:'行业格局',category:'svc',date:'2026-09-12',title:'国内 IT 运维管理原厂市场占比约 35%',summary:'国内 IT 运维管理原厂服务商市场占比约 35%，大型代表厂商有华为、联想等；专业第三方运维服务商包括天玑科技、银信科技、海量数据、新炬网络等。',source:'行业研究'},
+    {id:'f_seed4',vendor:'嘉为蓝鲸',category:'apm',date:'2026-09-12',title:'嘉为蓝鲸四大业务系列',summary:'嘉为蓝鲸为腾讯蓝鲸智云全国首家授权技术合作伙伴，拥有 IT 自动化运维、IT 基础架构服务、应用软件开发、云计算四大系列。',source:'厂商资料'},
+    {id:'f_seed5',vendor:'彩讯科技',category:'apm',date:'2026-09-12',title:'RichAPM 七大监控平台一体化',summary:'彩讯 RichAPM 已推出服务器/移动应用/网络流量/应用程序/网站/邮箱质量/中间件 七大监控产品，实现平台一体化集中监控。',source:'厂商资料'},
+    {id:'f_seed6',vendor:'新炬网络',category:'apm',date:'2026-09-12',title:'新炬运维产品矩阵',summary:'新炬网络自研 SIOPS 智慧运维、APM、DPM 数据库性能、SQL 审核、IVORY 日志分析、DAMS 数据资产、GDEVOPS 敏捷交付等平台。',source:'厂商资料'}
+  ]};
+  var CMP_STATE={q:'',cat:''};
+  function ensureCompetitors(){ if(!store.competitors||!store.competitors.vendors||!store.competitors.vendors.length){ store.competitors=JSON.parse(JSON.stringify(CMP_SEED)); try{persist()}catch(e){} } }
+  function cmpVendorCard(v){ return '<div class="vcard"><div class="vn">'+esc(v.name)+'</div>'+(v.aliases?'<div class="va">别名：'+esc(v.aliases)+'</div>':'')+'<div class="vd">'+esc(v.description||'')+'</div></div>' }
+  function renderCmpBlock(){
+    var box=document.getElementById('cmpBlock'); if(!box)return
+    var vs=(store.competitors&&store.competitors.vendors)||[]
+    var q=CMP_STATE.q.toLowerCase(), cf=CMP_STATE.cat
+    var list=vs.filter(function(v){ if(cf&&v.category!==cf)return false; if(q){var hay=(v.name+' '+(v.aliases||'')+' '+(v.description||'')).toLowerCase(); if(hay.indexOf(q)<0)return false} return true })
+    var chips='<span class="cmp-chip'+(cf===''?' on':'')+'" onclick="cmpFilter(\'\')">全部</span>'+Object.keys(CMP_CATS).map(function(k){return '<span class="cmp-chip'+(cf===k?' on':'')+'" onclick="cmpFilter(\''+k+'\')">'+CMP_CATS[k]+'</span>'}).join('')
+    var bycat={}; list.forEach(function(v){(bycat[v.category]=bycat[v.category]||[]).push(v)})
+    var groups=''; Object.keys(CMP_CATS).forEach(function(c){ if(!bycat[c])return; groups+='<div class="cmp-cat"><div class="cmp-cath"><b>'+CMP_CATS[c]+'</b><span class="tag">'+bycat[c].length+'</span></div><div class="cmp-grid">'+bycat[c].map(cmpVendorCard).join('')+'</div></div>' })
+    box.innerHTML='<div class="card"><div class="cmp-head"><h3 style="margin:0">🧭 竞品图谱</h3><span class="tag">共 '+list.length+' 家</span></div>'
+      +'<div class="cmp-tools"><input type="text" placeholder="搜索厂商 / 别名 / 描述…" value="'+esc(CMP_STATE.q)+'" oninput="cmpSearch(this.value)"></div>'
+      +'<div class="cmp-chips">'+chips+'</div>'+(groups||'<div class="empty">没有匹配的厂商</div>')+'</div>'
+  }
+  function renderFactsBlock(){
+    var box=document.getElementById('factsBlock'); if(!box)return
+    var E=canEditMarket()
+    var fs=((store.competitors&&store.competitors.facts)||[]).slice().sort(function(a,b){return (b.date||'').localeCompare(a.date||'')})
+    var items=fs.map(function(f){ return '<div class="mk-item"><div class="mk-item-h">'+esc(f.title)+(E?' <button class="btn sm ghost" style="float:right;padding:2px 8px" onclick="delCmpFact(\''+f.id+'\')">删除</button>':'')+'</div>'
+      +'<div class="mk-item-m">'+(f.category?'<span class="tag cat">'+esc(CMP_CATS[f.category]||f.category)+'</span>':'')+(f.vendor?' <span>🏷 '+esc(f.vendor)+'</span>':'')+(f.date?' <span>'+esc(f.date)+'</span>':'')+(f.source?' <span>来源：'+esc(f.source)+'</span>':'')+'</div>'
+      +(f.summary?'<div class="mk-item-s">'+esc(f.summary)+'</div>':'')+'</div>' }).join('')
+    var form=E?'<div class="cmp-fact-tools"><button class="btn sm ghost" onclick="toggleCmpFact()">＋ 录入动态</button></div><div class="cmp-fact-form" id="cmpFactForm" style="display:none">'
+      +'<div class="row2"><input id="cf_title" placeholder="标题"><input id="cf_vendor" placeholder="厂商 / 主体"></div>'
+      +'<div class="row2"><select id="cf_cat">'+Object.keys(CMP_CATS).map(function(k){return '<option value="'+k+'">'+CMP_CATS[k]+'</option>'}).join('')+'</select><input id="cf_date" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'
+      +'<textarea id="cf_sum" rows="2" placeholder="事件内容与值得关注的原因"></textarea>'
+      +'<div style="margin-top:6px"><input id="cf_src" placeholder="来源（可选）" style="width:60%"></div>'
+      +'<div style="text-align:right;margin-top:8px"><button class="btn sm" onclick="saveCmpFact()">保存入库</button></div></div>':''
+    box.innerHTML='<div class="card"><div class="cmp-head"><h3 style="margin:0">📌 行业关键动态</h3></div>'+form+'<div id="cmpFactList">'+(items||'<div class="empty">暂无</div>')+'</div></div>'
+  }
+  window.cmpSearch=function(v){CMP_STATE.q=v||'';renderCmpBlock()}
+  window.cmpFilter=function(c){CMP_STATE.cat=(CMP_STATE.cat===c?'':c);renderCmpBlock()}
+  window.toggleCmpFact=function(){var f=document.getElementById('cmpFactForm'); if(f)f.style.display=f.style.display==='none'?'':'none'}
+  window.saveCmpFact=function(){ var title=(document.getElementById('cf_title').value||'').trim(); if(!title){toast('请填写标题');return}
+    store.competitors=store.competitors||{vendors:[],facts:[]}; store.competitors.facts=store.competitors.facts||[]
+    store.competitors.facts.push({id:'f'+Date.now(),title:title,vendor:(document.getElementById('cf_vendor').value||'').trim(),category:document.getElementById('cf_cat').value,date:document.getElementById('cf_date').value,summary:(document.getElementById('cf_sum').value||'').trim(),source:(document.getElementById('cf_src').value||'').trim()})
+    try{persist()}catch(e){} renderFactsBlock(); toast('已保存并入库') }
+  window.delCmpFact=function(id){ if(!confirm('删除该动态？'))return; store.competitors.facts=(store.competitors.facts||[]).filter(function(f){return f.id!==id}); try{persist()}catch(e){} renderFactsBlock() }
+
   /* ================= 每日市场动态 ================= */
   window.renderMarketDaily = function () {
     var el = document.getElementById('marketDailyBody'); if (!el) return
+    ensureCompetitors()
     api('/api/market').then(function (r) {
-      if (r.status !== 200) { el.innerHTML = '<div class="card"><div class="empty">加载失败或无权限</div></div>'; return }
-      MKT = r.body; var E = canEditMarket()
-      var digest = (MKT.briefs || []).filter(function (b) { return b.type === 'digest' }).slice(0, 1)[0]
-      var digestHtml = digest ? '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">📰 ' + esc(digest.title) + '</h3>' + (E ? '<button class="btn sm ghost" onclick="mkDigestNow()">重新生成</button>' : '') + '</div><div class="mk-report-body">' + mkMd(digest.output) + '</div></div>'
-        : '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">📰 今日动态摘要</h3>' + (E ? '<button class="btn sm" onclick="mkDigestNow()">生成今日摘要</button>' : '') + '</div><div class="empty" style="padding:14px">尚未生成。系统每日 08:00 自动抓取并生成，也可手动点「生成」。</div></div>'
-      var groups = {}, order = []
-      ;(MKT.items || []).forEach(function (it) { var d = dayStr(it.publishedTs || it.fetchedAt); if (!groups[d]) { groups[d] = []; order.push(d) } groups[d].push(it) })
-      var body = order.slice(0, 30).map(function (d) {
-        return '<div class="card"><h3>' + d + ' <span class="tag">' + groups[d].length + ' 条</span></h3>' + groups[d].slice(0, 40).map(function (it) {
-          return '<div class="mk-item"><div class="mk-item-h">' + (it.url ? '<a href="' + esc(it.url) + '" target="_blank">' + esc(it.title) + '</a>' : esc(it.title)) + '</div>' +
-            '<div class="mk-item-m"><span class="tag">' + esc(it.sourceName) + '</span>' + (it.published ? ' <span>' + esc(it.published) + '</span>' : '') + (E ? ' <button class="btn sm ghost" style="float:right;padding:2px 8px" onclick="mkDelItem(\'' + it.id + '\')">删除</button>' : '') + '</div>' +
-            (it.summary ? '<div class="mk-item-s">' + esc(it.summary) + '</div>' : '') +
-            (it.points ? '<div class="mk-item-p">' + mkMd(it.points) + '</div>' : '') + '</div>'
-        }).join('') + '</div>'
-      }).join('')
-      el.innerHTML = digestHtml + (body || '<div class="card"><div class="empty">暂无抓取到的资讯，请到「市场情报」点「立即抓取」。</div></div>')
+      MKT = (r.status === 200) ? r.body : MKT
+      var E = canEditMarket()
+      var cmpHtml = '<div id="cmpBlock"></div><div id="factsBlock"></div>'
+      var feedHtml = ''
+      if (r.status === 200) {
+        var digest = (MKT.briefs || []).filter(function (b) { return b.type === 'digest' }).slice(0, 1)[0]
+        var digestHtml = digest ? '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">📰 抓取资讯 · 当日摘要</h3>' + (E ? '<button class="btn sm ghost" onclick="mkDigestNow()">重新生成</button>' : '') + '</div><div class="mk-report-body">' + mkMd(digest.output) + '</div></div>' : ''
+        var groups = {}, order = []
+        ;(MKT.items || []).forEach(function (it) { var d = dayStr(it.publishedTs || it.fetchedAt); if (!groups[d]) { groups[d] = []; order.push(d) } groups[d].push(it) })
+        var body = order.slice(0, 30).map(function (d) {
+          return '<div class="card"><h3>' + d + ' <span class="tag">' + groups[d].length + ' 条</span></h3>' + groups[d].slice(0, 40).map(function (it) {
+            return '<div class="mk-item"><div class="mk-item-h">' + (it.url ? '<a href="' + esc(it.url) + '" target="_blank">' + esc(it.title) + '</a>' : esc(it.title)) + '</div>' +
+              '<div class="mk-item-m"><span class="tag">' + esc(it.sourceName) + '</span>' + (it.published ? ' <span>' + esc(it.published) + '</span>' : '') + (E ? ' <button class="btn sm ghost" style="float:right;padding:2px 8px" onclick="mkDelItem(\'' + it.id + '\')">删除</button>' : '') + '</div>' +
+              (it.summary ? '<div class="mk-item-s">' + esc(it.summary) + '</div>' : '') +
+              (it.points ? '<div class="mk-item-p">' + mkMd(it.points) + '</div>' : '') + '</div>'
+          }).join('') + '</div>'
+        }).join('')
+        feedHtml = '<div class="card cmp-feed-head"><h3 style="margin:0">📡 每日资讯流</h3><span class="tag">RSS 自动抓取 · ' + (MKT.items || []).length + ' 条</span></div>' + digestHtml + body
+      }
+      el.innerHTML = cmpHtml + feedHtml
+      renderCmpBlock(); renderFactsBlock()
     })
   }
   window.mkDigestNow = function () { toast('生成中…'); api('/api/market/digest', { method: 'POST', body: '{}' }).then(function (r) { if (r.status === 200) { toast('已生成'); renderMarketDaily() } else toast((r.body && r.body.error) || '失败') }) }

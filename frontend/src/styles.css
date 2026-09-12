@@ -438,3 +438,27 @@ body.auth-pending #app{display:none!important}
 .mk-report-body .mk-table th{background:var(--grad);color:#fff;border-color:#c9d4f5}
 .mk-report-body .mk-table tr:nth-child(even) td{background:#f8faff}
 .mk-src{color:var(--brand);text-decoration:none;font-size:12px}.mk-src:hover{text-decoration:underline}
+
+/* ===== 竞品图谱（每日市场动态内） ===== */
+.cmp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.cmp-head h3{display:flex;align-items:center;gap:8px}
+.cmp-tools input{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 11px;font-size:13px}
+.cmp-chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+.cmp-chip{font-size:12px;padding:4px 12px;border-radius:16px;border:1px solid var(--line);background:#fff;color:var(--sub);cursor:pointer}
+.cmp-chip.on{background:var(--grad);color:#fff;border-color:transparent}
+.cmp-cat{margin-top:12px}
+.cmp-cath{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.cmp-cath b{font-size:13.5px}
+.cmp-cath::before{content:"";width:3px;height:14px;border-radius:2px;background:var(--grad)}
+.cmp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.vcard{background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+.vcard .vn{font-weight:700;font-size:13.5px}
+.vcard .va{font-size:11px;color:var(--sub);margin:2px 0 5px}
+.vcard .vd{font-size:12px;color:#414a5f;line-height:1.6}
+.tag.cat{background:#eef3fd;color:#1c5ed8}
+.cmp-fact-tools{margin-bottom:8px}
+.cmp-fact-form{border:1px dashed var(--line);border-radius:10px;padding:12px;margin-bottom:12px;background:#fbfcfe}
+.cmp-fact-form .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.cmp-fact-form input,.cmp-fact-form select,.cmp-fact-form textarea{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;font-family:inherit;width:100%}
+.cmp-fact-form textarea{resize:vertical}
+.cmp-feed-head{display:flex;justify-content:space-between;align-items:center}
