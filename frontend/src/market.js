@@ -197,8 +197,8 @@
     {id:'f_seed6',vendor:'新炬网络',category:'apm',date:'2026-09-12',title:'新炬运维产品矩阵',summary:'新炬网络自研 SIOPS 智慧运维、APM、DPM 数据库性能、SQL 审核、IVORY 日志分析、DAMS 数据资产、GDEVOPS 敏捷交付等平台。',source:'厂商资料'}
   ]};
   var CMP_STATE={q:'',cat:''};
-  function ensureCompetitors(){ if(!store.competitors||!store.competitors.vendors||!store.competitors.vendors.length){ store.competitors=JSON.parse(JSON.stringify(CMP_SEED)); try{persist()}catch(e){} } }
-  function cmpVendorCard(v){ return '<div class="vcard"><div class="vn">'+esc(v.name)+'</div>'+(v.aliases?'<div class="va">别名：'+esc(v.aliases)+'</div>':'')+'<div class="vd">'+esc(v.description||'')+'</div></div>' }
+  function ensureCompetitors(){ if(!store.competitors||!store.competitors.vendors||!store.competitors.vendors.length){ store.competitors=JSON.parse(JSON.stringify(CMP_SEED)); try{persist()}catch(e){} } var vv=(store.competitors&&store.competitors.vendors)||[]; for(var i=0;i<vv.length;i++){ if(!vv[i].id)vv[i].id='v'+(i+1); if(!vv[i].dynamics)vv[i].dynamics=[] } }
+  function cmpVendorCard(v){ var n=(v.dynamics||[]).length; return '<div class="vcard vcard-click" onclick="openVendor(\''+v.id+'\')"><div class="vn">'+esc(v.name)+' <span class="tag cat">'+esc(CMP_CATS[v.category]||v.category)+'</span></div>'+(v.aliases?'<div class="va">别名：'+esc(v.aliases)+'</div>':'')+'<div class="vd">'+esc(v.description||'')+'</div><div class="vc-foot"><span class="tag'+(n?' vc-hot':'')+'">动态 '+n+' 条</span>'+(canEditMarket()?'<span class="vc-acts"><button class="btn sm ghost" onclick="event.stopPropagation();fetchVendor(\''+v.id+'\')">⟳抓取</button> <button class="btn sm ghost" onclick="event.stopPropagation();openAddDyn(\''+v.id+'\')">＋录入</button></span>':'')+'</div></div>' }
   function renderCmpBlock(){
     var box=document.getElementById('cmpBlock'); if(!box)return
     var vs=(store.competitors&&store.competitors.vendors)||[]
@@ -211,57 +211,43 @@
       +'<div class="cmp-tools"><input type="text" placeholder="搜索厂商 / 别名 / 描述…" value="'+esc(CMP_STATE.q)+'" oninput="cmpSearch(this.value)"></div>'
       +'<div class="cmp-chips">'+chips+'</div>'+(groups||'<div class="empty">没有匹配的厂商</div>')+'</div>'
   }
-  function renderFactsBlock(){
-    var box=document.getElementById('factsBlock'); if(!box)return
+  var CURVENDOR=null
+  function findVendor(id){return (store.competitors&&store.competitors.vendors||[]).find(function(v){return v.id===id})}
+  function renderVendorBody(v){
     var E=canEditMarket()
-    var fs=((store.competitors&&store.competitors.facts)||[]).slice().sort(function(a,b){return (b.date||'').localeCompare(a.date||'')})
-    var items=fs.map(function(f){ return '<div class="mk-item"><div class="mk-item-h">'+esc(f.title)+(E?' <button class="btn sm ghost" style="float:right;padding:2px 8px" onclick="delCmpFact(\''+f.id+'\')">删除</button>':'')+'</div>'
-      +'<div class="mk-item-m">'+(f.category?'<span class="tag cat">'+esc(CMP_CATS[f.category]||f.category)+'</span>':'')+(f.vendor?' <span>🏷 '+esc(f.vendor)+'</span>':'')+(f.date?' <span>'+esc(f.date)+'</span>':'')+(f.source?' <span>来源：'+esc(f.source)+'</span>':'')+'</div>'
-      +(f.summary?'<div class="mk-item-s">'+esc(f.summary)+'</div>':'')+'</div>' }).join('')
-    var form=E?'<div class="cmp-fact-tools"><button class="btn sm ghost" onclick="toggleCmpFact()">＋ 录入动态</button></div><div class="cmp-fact-form" id="cmpFactForm" style="display:none">'
-      +'<div class="row2"><input id="cf_title" placeholder="标题"><input id="cf_vendor" placeholder="厂商 / 主体"></div>'
-      +'<div class="row2"><select id="cf_cat">'+Object.keys(CMP_CATS).map(function(k){return '<option value="'+k+'">'+CMP_CATS[k]+'</option>'}).join('')+'</select><input id="cf_date" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>'
-      +'<textarea id="cf_sum" rows="2" placeholder="事件内容与值得关注的原因"></textarea>'
-      +'<div style="margin-top:6px"><input id="cf_src" placeholder="来源（可选）" style="width:60%"></div>'
-      +'<div style="text-align:right;margin-top:8px"><button class="btn sm" onclick="saveCmpFact()">保存入库</button></div></div>':''
-    box.innerHTML='<div class="card"><div class="cmp-head"><h3 style="margin:0">📌 行业关键动态</h3></div>'+form+'<div id="cmpFactList">'+(items||'<div class="empty">暂无</div>')+'</div></div>'
+    var list=(v.dynamics||[]).slice().sort(function(a,b){return (b.date||'').localeCompare(a.date||'')})
+    var items=list.length?list.map(function(d){ return '<div class="mk-item"><div class="mk-item-h">'+(d.url?'<a href="'+esc(d.url)+'" target="_blank">'+esc(d.title)+'</a>':esc(d.title))+(E?' <button class="btn sm ghost" style="float:right;padding:2px 8px" onclick="delVendorDyn(\''+d.id+'\')">删</button>':'')+'</div><div class="mk-item-m">'+(d.source?'<span class="tag">'+esc(d.source)+'</span> ':'')+(d.date?'<span>'+esc(d.date)+'</span>':'')+'</div>'+(d.summary?'<div class="mk-item-s">'+esc(d.summary)+'</div>':'')+'</div>' }).join('') : '<div class="empty">暂无该厂商动态。点「⟳ 抓取动态」从已抓取的资讯中匹配，或「＋ 录入动态」手动添加。</div>'
+    document.getElementById('vendorViewBody').innerHTML='<div class="vv-head"><span class="tag cat">'+esc(CMP_CATS[v.category]||v.category)+'</span>'+(v.aliases?'<span class="vv-al">别名：'+esc(v.aliases)+'</span>':'')+'</div>'+(v.description?'<div class="vv-desc">'+esc(v.description)+'</div>':'')
+      +'<div class="vv-acts">'+(E?'<button class="btn sm" onclick="fetchVendor(\''+v.id+'\')">⟳ 抓取动态</button><button class="btn sm ghost" onclick="openAddDyn(\''+v.id+'\')">＋ 录入动态</button><button class="btn sm danger" onclick="delVendor(\''+v.id+'\')">删除厂商</button>':'')+'</div>'
+      +'<div class="vv-hist"><b>历史抓取明细</b><span class="tag">'+list.length+' 条</span>'+(v.lastFetch?' <span class="vv-lf">上次抓取 '+dt(v.lastFetch)+'</span>':'')+'</div>'+items
   }
+  window.openVendor=function(id){ var v=findVendor(id); if(!v)return; CURVENDOR=id; document.getElementById('vendorViewTitle').textContent=v.name; renderVendorBody(v); openMask('mVendorView') }
+  async function scanPools(v){ var names=[v.name].concat(String(v.aliases||'').split(/[;；,，]/).map(function(s){return s.trim()}).filter(Boolean)); var pools=[];
+    function add(items,map){ (items||[]).forEach(function(i){ pools.push(map(i)) }) }
+    try{var m=await api('/api/market'); if(m.status===200)add(m.body.items,function(i){return {title:i.title,url:i.url,summary:i.summary,date:i.published||dayStr(i.fetchedAt),source:i.sourceName}})}catch(e){}
+    try{var s=await api('/api/scenario'); if(s.status===200)add(s.body.items,function(i){return {title:i.title,url:i.url,summary:i.summary,date:i.published||dayStr(i.fetchedAt),source:i.sourceName}})}catch(e){}
+    try{var a=await api('/api/aidaily'); if(a.status===200)add(a.body.reports,function(i){return {title:i.title,url:i.url,summary:'',date:i.date||'',source:'AI应用日报'}})}catch(e){}
+    return pools.filter(function(p){var hay=((p.title||'')+' '+(p.summary||'')).toLowerCase(); return names.some(function(n){return n&&hay.indexOf(n.toLowerCase())>=0})})
+  }
+  window.fetchVendor=function(id){ var v=findVendor(id); if(!v)return; toast('匹配厂商动态中…'); scanPools(v).then(function(hits){ var have={}; (v.dynamics||[]).forEach(function(d){ if(d.url)have[d.url]=1 }); var added=0; v.dynamics=v.dynamics||[]; hits.forEach(function(h){ if(h.url&&have[h.url])return; if(h.url)have[h.url]=1; added++; v.dynamics.push({id:'d'+Date.now()+Math.floor(Math.random()*1e4),title:h.title,url:h.url||'',summary:h.summary||'',date:h.date||'',source:h.source||'匹配',addedAt:Date.now()}) }); v.lastFetch=Date.now(); if(v.dynamics.length>80)v.dynamics=v.dynamics.slice(0,80); try{persist()}catch(e){} renderVendorBody(v); renderCmpBlock(); toast('匹配到 '+hits.length+' 条，新增 '+added+' 条') }).catch(function(){toast('抓取失败')}) }
+  window.openAddDyn=function(id){ CURVENDOR=id; ['vd_title','vd_url','vd_sum','vd_src'].forEach(function(i){var e=document.getElementById(i);if(e)e.value=''}); document.getElementById('vd_date').value=new Date().toISOString().slice(0,10); openMask('mVendorDyn') }
+  window.saveAddDyn=function(){ var v=findVendor(CURVENDOR); if(!v)return; var title=(document.getElementById('vd_title').value||'').trim(); if(!title){toast('请填写标题');return} v.dynamics=v.dynamics||[]; v.dynamics.push({id:'d'+Date.now(),title:title,url:(document.getElementById('vd_url').value||'').trim(),summary:(document.getElementById('vd_sum').value||'').trim(),date:document.getElementById('vd_date').value||new Date().toISOString().slice(0,10),source:(document.getElementById('vd_src').value||'').trim()||'手动',addedAt:Date.now()}); try{persist()}catch(e){} closeMask('mVendorDyn'); renderVendorBody(v); renderCmpBlock(); toast('已录入并入库') }
+  window.delVendorDyn=function(did){ var v=findVendor(CURVENDOR); if(!v||!confirm('删除该动态？'))return; v.dynamics=(v.dynamics||[]).filter(function(d){return d.id!==did}); try{persist()}catch(e){} renderVendorBody(v); renderCmpBlock() }
+  window.delVendor=function(id){ var v=findVendor(id); if(!v||!confirm('删除厂商「'+v.name+'」及其动态？'))return; store.competitors.vendors=store.competitors.vendors.filter(function(x){return x.id!==id}); try{persist()}catch(e){} closeMask('mVendorView'); renderCmpBlock(); toast('已删除') }
+  window.openAddVendor=function(){ ['av_name','av_alias','av_desc'].forEach(function(i){var e=document.getElementById(i);if(e)e.value=''}); document.getElementById('av_cat').innerHTML=Object.keys(CMP_CATS).map(function(k){return '<option value="'+k+'">'+CMP_CATS[k]+'</option>'}).join(''); document.getElementById('av_err').textContent=''; openMask('mVendorAdd') }
+  window.saveAddVendor=function(){ var name=(document.getElementById('av_name').value||'').trim(); var err=document.getElementById('av_err'); if(!name){err.textContent='请填写厂商名称';return} store.competitors=store.competitors||{vendors:[],facts:[]}; store.competitors.vendors=store.competitors.vendors||[]; if(store.competitors.vendors.some(function(v){return v.name===name})){err.textContent='厂商已存在';return} store.competitors.vendors.push({id:'v'+Date.now(),name:name,category:document.getElementById('av_cat').value,aliases:(document.getElementById('av_alias').value||'').trim(),description:(document.getElementById('av_desc').value||'').trim(),dynamics:[]}); try{persist()}catch(e){} closeMask('mVendorAdd'); renderCmpBlock(); toast('已添加厂商') }
   window.cmpSearch=function(v){CMP_STATE.q=v||'';renderCmpBlock()}
   window.cmpFilter=function(c){CMP_STATE.cat=(CMP_STATE.cat===c?'':c);renderCmpBlock()}
-  window.toggleCmpFact=function(){var f=document.getElementById('cmpFactForm'); if(f)f.style.display=f.style.display==='none'?'':'none'}
-  window.saveCmpFact=function(){ var title=(document.getElementById('cf_title').value||'').trim(); if(!title){toast('请填写标题');return}
-    store.competitors=store.competitors||{vendors:[],facts:[]}; store.competitors.facts=store.competitors.facts||[]
-    store.competitors.facts.push({id:'f'+Date.now(),title:title,vendor:(document.getElementById('cf_vendor').value||'').trim(),category:document.getElementById('cf_cat').value,date:document.getElementById('cf_date').value,summary:(document.getElementById('cf_sum').value||'').trim(),source:(document.getElementById('cf_src').value||'').trim()})
-    try{persist()}catch(e){} renderFactsBlock(); toast('已保存并入库') }
-  window.delCmpFact=function(id){ if(!confirm('删除该动态？'))return; store.competitors.facts=(store.competitors.facts||[]).filter(function(f){return f.id!==id}); try{persist()}catch(e){} renderFactsBlock() }
-
-  /* ================= 每日市场动态 ================= */
+  /* ================= 厂商动态 ================= */
   window.renderMarketDaily = function () {
     var el = document.getElementById('marketDailyBody'); if (!el) return
     ensureCompetitors()
-    api('/api/market').then(function (r) {
-      MKT = (r.status === 200) ? r.body : MKT
-      var E = canEditMarket()
-      var cmpHtml = '<div id="cmpBlock"></div><div id="factsBlock"></div>'
-      var feedHtml = ''
-      if (r.status === 200) {
-        var digest = (MKT.briefs || []).filter(function (b) { return b.type === 'digest' }).slice(0, 1)[0]
-        var digestHtml = digest ? '<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">📰 抓取资讯 · 当日摘要</h3>' + (E ? '<button class="btn sm ghost" onclick="mkDigestNow()">重新生成</button>' : '') + '</div><div class="mk-report-body">' + mkMd(digest.output) + '</div></div>' : ''
-        var groups = {}, order = []
-        ;(MKT.items || []).forEach(function (it) { var d = dayStr(it.publishedTs || it.fetchedAt); if (!groups[d]) { groups[d] = []; order.push(d) } groups[d].push(it) })
-        var body = order.slice(0, 30).map(function (d) {
-          return '<div class="card"><h3>' + d + ' <span class="tag">' + groups[d].length + ' 条</span></h3>' + groups[d].slice(0, 40).map(function (it) {
-            return '<div class="mk-item"><div class="mk-item-h">' + (it.url ? '<a href="' + esc(it.url) + '" target="_blank">' + esc(it.title) + '</a>' : esc(it.title)) + '</div>' +
-              '<div class="mk-item-m"><span class="tag">' + esc(it.sourceName) + '</span>' + (it.published ? ' <span>' + esc(it.published) + '</span>' : '') + (E ? ' <button class="btn sm ghost" style="float:right;padding:2px 8px" onclick="mkDelItem(\'' + it.id + '\')">删除</button>' : '') + '</div>' +
-              (it.summary ? '<div class="mk-item-s">' + esc(it.summary) + '</div>' : '') +
-              (it.points ? '<div class="mk-item-p">' + mkMd(it.points) + '</div>' : '') + '</div>'
-          }).join('') + '</div>'
-        }).join('')
-        feedHtml = '<div class="card cmp-feed-head"><h3 style="margin:0">📡 每日资讯流</h3><span class="tag">RSS 自动抓取 · ' + (MKT.items || []).length + ' 条</span></div>' + digestHtml + body
-      }
-      el.innerHTML = cmpHtml + feedHtml
-      renderCmpBlock(); renderFactsBlock()
-    })
+    var E = canEditMarket()
+    var vs = (store.competitors && store.competitors.vendors) || []
+    var head = '<div class="mk-page-head"><div class="mk-stats">共 <b>' + vs.length + '</b> 家厂商 · 点厂商卡查看历史抓取明细，「⟳ 抓取」从已抓资讯中匹配该厂商动态</div>'
+      + '<div class="mk-toolbar">' + (E ? '<button class="btn sm" onclick="openAddVendor()">＋ 添加厂商</button>' : '') + '</div></div>'
+    el.innerHTML = head + '<div id="cmpBlock"></div>'
+    renderCmpBlock()
   }
   window.mkDigestNow = function () { toast('生成中…'); api('/api/market/digest', { method: 'POST', body: '{}' }).then(function (r) { if (r.status === 200) { toast('已生成'); renderMarketDaily() } else toast((r.body && r.body.error) || '失败') }) }
   window.mkDelItem = function (id) { if (!confirm('删除该条？')) return; api('/api/market/item/' + id, { method: 'DELETE' }).then(function () { renderMarketDaily() }) }

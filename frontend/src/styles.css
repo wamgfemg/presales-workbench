@@ -462,3 +462,16 @@ body.auth-pending #app{display:none!important}
 .cmp-fact-form input,.cmp-fact-form select,.cmp-fact-form textarea{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:13px;font-family:inherit;width:100%}
 .cmp-fact-form textarea{resize:vertical}
 .cmp-feed-head{display:flex;justify-content:space-between;align-items:center}
+
+.vcard-click{cursor:pointer;transition:.12s}
+.vcard-click:hover{border-color:#b9c7f5;box-shadow:0 3px 12px rgba(31,42,70,.1);transform:translateY(-1px)}
+.vc-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:6px}
+.vc-acts{display:flex;gap:4px}
+.vc-acts button{padding:2px 8px;font-size:11px}
+.vc-hot{background:#eef3fd;color:#1c5ed8}
+.vv-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.vv-al{font-size:12px;color:var(--sub)}
+.vv-desc{font-size:13px;color:#414a5f;line-height:1.6;margin-bottom:10px}
+.vv-acts{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.vv-hist{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);margin-bottom:6px}
+.vv-lf{font-size:11px;color:var(--sub);margin-left:auto}

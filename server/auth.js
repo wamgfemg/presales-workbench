@@ -27,7 +27,7 @@ const MODULES = [
   { key: 'compintel', label: '竞争情报' },
   { key: 'requirements', label: '需求管理' },
   { key: 'market', label: '市场情报' },
-  { key: 'marketdaily', label: '每日市场动态' },
+  { key: 'marketdaily', label: '厂商动态' },
   { key: 'aidaily', label: 'AI应用日报' },
   { key: 'scenario', label: '解决方案创新场景' },
 ]
