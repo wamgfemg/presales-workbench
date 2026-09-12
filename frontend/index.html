@@ -28,6 +28,7 @@
       <button data-p="market"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.8 2.6 15.4 0 18M12 3c-2.6 2.8-2.6 15.4 0 18"/></svg></span>市场情报</button>
       <button data-p="marketdaily"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4M7.5 13h5M7.5 16.5h8"/></svg></span>每日市场动态</button>
       <button data-p="aidaily"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h13v14H6a2 2 0 0 1-2-2z"/><path d="M17 8h3v9a2 2 0 0 1-2 2M7 9h7M7 12h7M7 15h4"/></svg></span>AI应用日报</button>
+      <button data-p="scenario"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 18h5M10.5 21h3"/><path d="M12 3a6 6 0 0 0-3.8 10.6c.6.5 1.1 1.3 1.3 2.4h5c.2-1.1.7-1.9 1.3-2.4A6 6 0 0 0 12 3z"/></svg></span>解决方案创新场景</button>
       <button data-p="docs"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L18.5 9.5l-4-4L4 16z"/><path d="M13.5 5.5l4 4"/></svg></span>方案制作中心</button>
       <!-- 需求管理入口已按需求隐藏（保留 DOM 与逻辑，去掉下一行的 style 即可恢复） -->
       <button data-p="requirements" style="display:none"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6l1 1 1.8-2M4.5 11.5l1 1 1.8-2M4.5 17l1 1 1.8-2"/></svg></span>需求管理</button>
@@ -315,6 +316,12 @@
     <section class="page" id="p-aidaily">
       <div class="page-head"><div><h2>AI应用日报</h2><div class="desc">收录「静言波语」等公众号发布的《企业级AI应用日报》，AI 自动整理成结构化日报并归档展示</div></div></div>
       <div id="aidailyBody"></div>
+    </section>
+
+    <!-- ============ 解决方案创新场景 ============ -->
+    <section class="page" id="p-scenario">
+      <div class="page-head"><div><h2>解决方案创新场景</h2><div class="desc">抓取软件解决方案 / 创新场景资讯，AI 提炼成结构化「创新场景卡」，供方案与投标借鉴</div></div></div>
+      <div id="scenarioBody"></div>
     </section>
 
     <!-- ============ 报价管理 ============ -->
@@ -635,6 +642,25 @@
     <div id="adLinksBody"></div>
   </div></div>
 
+  <!-- ===== 解决方案创新场景弹窗 ===== -->
+  <div class="mask" id="mScView"><div class="modal mk-view-modal">
+    <h3><span id="scViewTitle">创新场景卡</span><button class="x" onclick="closeMask('mScView')">✕</button></h3>
+    <div id="scViewBody" class="mk-view-scroll"></div>
+  </div></div>
+  <div class="mask" id="mScImport"><div class="modal" style="width:560px">
+    <h3><span>录入创新场景</span><button class="x" onclick="closeMask('mScImport')">✕</button></h3>
+    <label class="f"><span>文章 / 案例页 URL</span><div style="display:flex;gap:8px"><input id="scImpUrl" placeholder="https://…"><button class="btn" onclick="submitScImport()">抓取并提炼</button></div></label>
+    <div class="hint" style="text-align:center;margin:6px 0">— 或粘贴原文 —</div>
+    <label class="f"><span>标题（可空）</span><input id="scImpTitle" placeholder="不填则自动识别"></label>
+    <label class="f"><span>原文</span><textarea id="scImpText" rows="4" placeholder="粘贴解决方案 / 创新案例正文，AI 提炼成场景卡"></textarea></label>
+    <div class="login-err" id="scImpErr"></div>
+    <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mScImport')">关闭</button><button class="btn" style="margin-left:10px" onclick="submitScImport()">提炼场景卡</button></div>
+  </div></div>
+  <div class="mask" id="mScSources"><div class="modal" style="width:640px">
+    <h3><span>来源管理</span><button class="x" onclick="closeMask('mScSources')">✕</button></h3>
+    <div id="scSrcBody"></div>
+  </div></div>
+
 <script src="./src/main.js"></script>
   <!-- 向量知识库：接入 WeKnora 真实知识库，覆盖 main.js 中的本地模拟逻辑 -->
   <script src="./src/kb-weknora.js"></script>
@@ -644,5 +670,6 @@
 <script src="./src/auth.js"></script>
 <script src="./src/market.js"></script>
 <script src="./src/aidaily.js"></script>
+<script src="./src/scenario.js"></script>
 </body>
 </html>

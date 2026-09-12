@@ -29,6 +29,7 @@ const MODULES = [
   { key: 'market', label: '市场情报' },
   { key: 'marketdaily', label: '每日市场动态' },
   { key: 'aidaily', label: 'AI应用日报' },
+  { key: 'scenario', label: '解决方案创新场景' },
 ]
 const MODULE_KEYS = MODULES.map(m => m.key)
 const LABEL = k => (MODULES.find(m => m.key === k) || {}).label || k
@@ -124,6 +125,7 @@ function authorize(user, p, method) {
   if (p === '/api/weknora/doc-category') return canEdit('kb') ? { ok: true } : { ok: false, error: '需要「向量知识库」编辑权限' }
   if (p.startsWith('/api/market')) return canEdit('market') ? { ok: true } : { ok: false, error: '需要「市场情报」编辑权限' }
   if (p.startsWith('/api/aidaily')) return canEdit('aidaily') ? { ok: true } : { ok: false, error: '需要「AI应用日报」编辑权限' }
+  if (p.startsWith('/api/scenario')) return canEdit('scenario') ? { ok: true } : { ok: false, error: '需要「解决方案创新场景」编辑权限' }
   return { ok: true } // chat / qa / reset / attach 等：任何登录用户可用
 }
 

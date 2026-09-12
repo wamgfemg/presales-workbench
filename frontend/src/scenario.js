@@ -1,0 +1,44 @@
+/* ===== 解决方案创新场景前端：场景卡台账 + 详情 + 录入/来源弹窗（依赖 main.js toast/openMask/closeMask，auth.js canEdit/currentRole） ===== */
+(function () {
+  var SC = { sources: [], items: [], cards: [], stats: {} }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] }) }
+  function canEdit() { var r = window.currentRole && window.currentRole(); return r === 'admin' || (window.canEdit && window.canEdit('scenario')) }
+  function api(url, o) { return fetch(url, Object.assign({ headers: { 'content-type': 'application/json' } }, o || {})).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j } }).catch(function () { return { status: r.status, body: {} } }) }) }
+  function dt(ts) { return new Date(ts).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-') }
+  function inline(t) { return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`(.+?)`/g, '<code>$1</code>').replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank">$1</a>') }
+  function mkMd(src) { var lines = String(src || '').split(/\r?\n/), html = '', para = []; function flush() { if (para.length) { html += '<p>' + inline(para.join(' ')) + '</p>'; para = [] } } for (var i = 0; i < lines.length; i++) { var ln = lines[i]; if (/^\s*$/.test(ln)) { flush(); continue } var hm = /^(#{1,4})\s+(.*)$/.exec(ln); if (hm) { flush(); var lv = hm[1].length; html += '<h' + lv + '>' + inline(hm[2]) + '</h' + lv + '>'; continue } var lm = /^\s*[-*·]\s+(.*)$/.exec(ln); if (lm) { flush(); html += '<div class="mk-li">· ' + inline(lm[1]) + '</div>'; continue } para.push(ln.trim()) } flush(); return html }
+  function load() { return api('/api/scenario').then(function (r) { if (r.status === 200) SC = r.body; return r }) }
+
+  window.renderScenario = function () {
+    var el = document.getElementById('scenarioBody'); if (!el) return
+    load().then(function (r) {
+      if (r.status !== 200) { el.innerHTML = '<div class="card"><div class="empty">加载失败或无权限</div></div>'; return }
+      var E = canEdit()
+      var toolbar = '<div class="mk-toolbar">' + (E ? '<button class="btn sm" onclick="openScImport()">＋ 录入场景</button><button class="btn sm" id="scFetchBtn" onclick="scFetch()">⟳ 抓取资讯</button>' : '') + '<button class="btn sm ghost" onclick="openScSources()">🔗 来源管理</button></div>'
+      var head = '<div class="mk-page-head"><div class="mk-stats">共 <b>' + (SC.cards || []).length + '</b> 个场景卡 · 候选资讯 ' + (SC.items || []).length + ' 条 · 上次抓取 ' + (SC.stats && SC.stats.lastRun ? dt(SC.stats.lastRun) : '从未') + '</div>' + toolbar + '</div>'
+      var cards = (SC.cards || []).map(function (c) {
+        var prev = String(c.output || '').replace(/[#*>-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70)
+        return '<tr class="mk-row" onclick="scView(\'' + c.id + '\')"><td class="mk-rt-title"><b>' + esc(c.title) + '</b><div class="mk-rt-prev">' + esc(prev) + '…</div></td><td class="mk-rt-time">' + dt(c.createdAt) + '</td><td>' + (c.url ? '<a class="mk-src" href="' + esc(c.url) + '" target="_blank" onclick="event.stopPropagation()">原文</a>' : '—') + '</td><td>' + (E ? '<button class="btn sm ghost" onclick="event.stopPropagation();scDelCard(\'' + c.id + '\')">删除</button>' : '') + '</td></tr>'
+      }).join('')
+      var cardsHtml = (SC.cards || []).length ? '<div class="card mk-reports-card"><div style="overflow-x:auto"><table class="mk-reports"><tr><th>创新场景卡</th><th style="width:150px">生成时间</th><th style="width:60px">原文</th><th style="width:64px">操作</th></tr>' + cards + '</table></div></div>'
+        : '<div class="card"><div class="empty">还没有场景卡。点「＋ 录入场景」粘贴一篇解决方案/案例文章链接或原文，AI 会提炼成结构化创新场景卡。<div style="margin-top:12px">' + (E ? '<button class="btn" onclick="openScImport()">＋ 录入场景</button>' : '') + '</div></div></div>'
+      var cand = ''
+      if (E && (SC.items || []).length) {
+        cand = '<div class="card"><div class="cmp-head"><h3 style="margin:0">📡 候选资讯（RSS 抓取）</h3><span class="tag">点「存为场景卡」由 AI 提炼</span></div>' + SC.items.slice(0, 30).map(function (it) {
+          return '<div class="mk-item"><div class="mk-item-h">' + (it.url ? '<a href="' + esc(it.url) + '" target="_blank">' + esc(it.title) + '</a>' : esc(it.title)) + '<button class="btn sm ghost" style="float:right;padding:2px 8px" onclick="scPromote(\'' + it.id + '\')">存为场景卡</button></div><div class="mk-item-m"><span class="tag">' + esc(it.sourceName) + '</span> ' + esc(it.published || '') + '</div>' + (it.summary ? '<div class="mk-item-s">' + esc(it.summary) + '</div>' : '') + '</div>'
+        }).join('') + '</div>'
+      }
+      el.innerHTML = head + cardsHtml + cand
+    })
+  }
+  window.scView = function (id) { var c = (SC.cards || []).find(function (x) { return x.id === id }); if (!c) return; document.getElementById('scViewTitle').textContent = '创新场景卡'; document.getElementById('scViewBody').innerHTML = '<div class="mk-report"><div class="mk-report-head"><span class="mk-report-kicker">软件解决方案 · 创新场景</span><h2>' + esc(c.title) + '</h2><div class="mk-report-meta"><span>' + dt(c.createdAt) + '</span>' + (c.url ? '<a href="' + esc(c.url) + '" target="_blank">查看原文</a>' : '') + '<span>AI 提炼，供参考</span></div></div><div class="mk-report-body">' + mkMd(c.output) + '</div></div>'; openMask('mScView') }
+  window.openScImport = function () { ['scImpUrl', 'scImpTitle', 'scImpText'].forEach(function (i) { var e = document.getElementById(i); if (e) e.value = '' }); document.getElementById('scImpErr').textContent = ''; openMask('mScImport') }
+  window.submitScImport = function () { var url = document.getElementById('scImpUrl').value.trim(), text = document.getElementById('scImpText').value.trim(), title = document.getElementById('scImpTitle').value.trim(), err = document.getElementById('scImpErr'); err.textContent = ''; if (!url && !text) { err.textContent = '请粘贴链接或原文'; return } var b = document.querySelectorAll('#mScImport button'); b.forEach(function (x) { x.disabled = true }); toast('AI 提炼中，约需 1 分钟…'); api('/api/scenario/card', { method: 'POST', body: JSON.stringify({ url: url, text: text, title: title }) }).then(function (r) { b.forEach(function (x) { x.disabled = false }); if (r.status === 200) { closeMask('mScImport'); toast('场景卡已生成'); renderScenario() } else err.textContent = (r.body && r.body.error) || '失败' }).catch(function () { b.forEach(function (x) { x.disabled = false }); err.textContent = '失败' }) }
+  window.scPromote = function (itemId) { toast('AI 提炼中…'); api('/api/scenario/card', { method: 'POST', body: JSON.stringify({ itemId: itemId }) }).then(function (r) { if (r.status === 200) { toast('已存为场景卡'); renderScenario() } else toast((r.body && r.body.error) || '失败') }) }
+  window.scFetch = function () { var b = document.getElementById('scFetchBtn'); if (b) { b.disabled = true; b.textContent = '抓取中…' } api('/api/scenario/fetch', { method: 'POST', body: '{}' }).then(function (r) { if (b) { b.disabled = false; b.textContent = '⟳ 抓取资讯' } if (r.status === 200) { toast('抓取完成，新增 ' + (r.body.added || 0) + ' 条'); renderScenario() } else toast((r.body && r.body.error) || '失败') }).catch(function () { if (b) { b.disabled = false; b.textContent = '⟳ 抓取资讯' } }) }
+  window.openScSources = function () { load().then(renderScSourcesModal); openMask('mScSources') }
+  function renderScSourcesModal() { var rows = (SC.sources || []).map(function (s) { return '<tr><td>' + esc(s.name) + '</td><td class="mk-url">' + esc(s.url) + '</td><td><button class="btn sm danger" onclick="scDelSource(\'' + s.id + '\')">删除</button></td></tr>' }).join(''); document.getElementById('scSrcBody').innerHTML = '<div style="overflow-x:auto"><table><tr><th>名称</th><th>源地址</th><th style="width:80px">操作</th></tr>' + (rows || '<tr><td colspan="3" class="empty">暂无来源</td></tr>') + '</table></div><div class="mk-src-add"><input id="ssName" placeholder="来源名称"><input id="ssUrl" placeholder="RSS/Atom 地址 https://…"><button class="btn sm" onclick="scAddSource()">＋ 添加</button></div><div class="hint" style="margin-top:10px">每日 09:15 自动抓取；也可点「抓取资讯」手动拉取。政府/厂商案例页多无 RSS，建议用「＋ 录入场景」粘贴链接/原文。</div>' }
+  window.scAddSource = function () { var name = document.getElementById('ssName').value.trim(), url = document.getElementById('ssUrl').value.trim(); if (!url) { toast('请输入源地址'); return } api('/api/scenario/source', { method: 'POST', body: JSON.stringify({ name: name, url: url }) }).then(function (r) { if (r.status === 200) { toast('已添加'); load().then(renderScSourcesModal) } else toast((r.body && r.body.error) || '失败') }) }
+  window.scDelSource = function (id) { if (!confirm('删除该来源？')) return; api('/api/scenario/source/' + id, { method: 'DELETE' }).then(function () { load().then(renderScSourcesModal) }) }
+  window.scDelCard = function (id) { if (!confirm('删除该场景卡？')) return; api('/api/scenario/card/' + id, { method: 'DELETE' }).then(renderScenario) }
+})()
