@@ -1635,10 +1635,11 @@ function renderStakeholders(){
     h+=`<div class="empty" style="margin-top:12px">该项目还没有记录关键人 —— 先补必备角色：`+
       KEY_ROLES.map(r=>`<button class="btn sm ghost" style="margin:2px" onclick="openStakeholderModal(null,'${r}','${pid}')">＋ ${r}</button>`).join('')+`</div></div>`;
     el.innerHTML=h;return}
-  h+=`<div style="overflow-x:auto;margin-top:12px"><table><tr><th>姓名</th><th>角色</th><th>部门/职务</th><th>影响力</th><th>立场</th><th>关注重点</th><th>我方策略</th><th>更新</th><th style="width:130px">操作</th></tr>`+
+  h+=`<div style="overflow-x:auto;margin-top:12px"><table><tr><th>姓名</th><th>角色</th><th>部门/职务</th><th>联系方式</th><th>影响力</th><th>立场</th><th>关注重点</th><th>我方策略</th><th>更新</th><th style="width:130px">操作</th></tr>`+
   list.map(s=>`<tr>
-    <td><b>${esc(s.name||'—')}</b>${s.phone?`<br><small style="color:var(--sub)">${esc(s.phone)}</small>`:''}</td>
+    <td><b>${esc(s.name||'—')}</b></td>
     <td>${esc(s.role||'—')}</td><td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
+    <td class="stk-contact">${[s.phone&&('📱 '+esc(s.phone)),s.wechat&&('💬 '+esc(s.wechat)),s.email&&('✉️ '+esc(s.email))].filter(Boolean).join('<br>')||'<span style="color:var(--sub)">—</span>'}</td>
     <td>${influenceBadge(s.influence)}</td><td>${attitudeBadge(s.attitude)}</td>
     <td style="max-width:190px">${esc(s.focus||'')}</td><td style="max-width:210px">${esc(s.strategy||'')}</td>
     <td style="white-space:nowrap;color:var(--sub);font-size:12px">${esc(s.updated||'—')}</td>
@@ -1667,6 +1668,7 @@ function openStakeholderModal(id,presetRole,pid){
   document.getElementById('stkInfluence').value=s?s.influence:'medium';
   document.getElementById('stkAttitude').value=s?s.attitude:'neutral';
   document.getElementById('stkPhone').value=s?s.phone:'';
+  document.getElementById('stkWechat').value=s?(s.wechat||''):'';
   document.getElementById('stkEmail').value=s?s.email:'';
   document.getElementById('stkFocus').value=s?s.focus:'';
   document.getElementById('stkStrategy').value=s?(s.strategy||''):'';
@@ -1687,7 +1689,7 @@ function saveStakeholder(){
     id:id||uid(),name,title:document.getElementById('stkTitle').value.trim(),
     dept:document.getElementById('stkDept').value.trim(),role:document.getElementById('stkRole').value,
     influence:document.getElementById('stkInfluence').value,attitude:document.getElementById('stkAttitude').value,
-    phone:document.getElementById('stkPhone').value.trim(),email:document.getElementById('stkEmail').value.trim(),
+    phone:document.getElementById('stkPhone').value.trim(),email:document.getElementById('stkEmail').value.trim(),wechat:document.getElementById('stkWechat').value.trim(),
     focus:document.getElementById('stkFocus').value.trim(),notes:document.getElementById('stkNotes').value.trim(),
     strategy:document.getElementById('stkStrategy').value.trim(),
     updated:today()
@@ -2179,10 +2181,10 @@ function renderRequirements(){
       <button class="btn ghost" onclick="jumpToPdocsInput('${pid}')">汇入项目知识库 →</button>
       <button class="btn" onclick="openRequirementModal()">＋ 新增需求</button></div></div>`;
   if(!list.length){h+='<div class="empty">暂无需求，点击右上角新增，或去项目知识库录入原始输入</div></div>';el.innerHTML=h;return}
-  h+=`<table><tr><th>标题</th><th>类别</th><th>优先级</th><th>来源</th><th>状态</th><th>分析结论</th><th style="width:120px">操作</th></tr>`+
+  h+=`<table><tr><th>标题</th><th>类别</th><th>优先级</th><th>来源</th><th>提出方</th><th>状态</th><th>分析结论</th><th style="width:120px">操作</th></tr>`+
   list.map(r=>`<tr>
     <td><b>${esc(r.title)}</b></td><td>${esc(r.category||'—')}</td><td>${priorityBadge(r.priority)}</td>
-    <td>${esc(r.source||'—')}</td><td>${reqStatusBadge(r.status)}</td>
+    <td>${esc(r.source||'—')}</td><td>${esc(r.owner||'—')}</td><td>${reqStatusBadge(r.status)}</td>
     <td style="max-width:260px">${esc(r.analysis||'—')}</td>
     <td><button class="btn sm ghost" onclick="openRequirementModal('${r.id}')">编辑</button>
     <button class="btn sm danger" onclick="delRequirement('${r.id}')">删除</button></td></tr>`).join('')+'</table></div>';
@@ -2211,6 +2213,8 @@ function openRequirementModal(id){
   document.getElementById('rqKb').value=r?r.relatedKb:'';
   document.getElementById('rqDesc').value=r?r.description:'';
   document.getElementById('rqAnalysis').value=r?r.analysis:'';
+  document.getElementById('rqOwner').value=r?(r.owner||''):'';
+  document.getElementById('rqAccept').value=r?(r.acceptance||''):'';
   openMask('mRequirement');
 }
 function saveRequirement(){
@@ -2222,7 +2226,7 @@ function saveRequirement(){
     id:id||uid(),title,category:document.getElementById('rqCategory').value,
     priority:document.getElementById('rqPriority').value,status:document.getElementById('rqStatus').value,
     source:document.getElementById('rqSource').value.trim(),relatedKb:document.getElementById('rqKb').value.trim(),
-    description:document.getElementById('rqDesc').value.trim(),analysis:document.getElementById('rqAnalysis').value.trim(),
+    description:document.getElementById('rqDesc').value.trim(),analysis:document.getElementById('rqAnalysis').value.trim(),owner:document.getElementById('rqOwner').value.trim(),acceptance:document.getElementById('rqAccept').value.trim(),
     updated:today()
   };
   if(id){const i=store.requirements[pid].findIndex(x=>x.id===id);if(i>-1)store.requirements[pid][i]=data}
