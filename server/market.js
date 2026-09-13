@@ -212,15 +212,28 @@ async function handle(req, res, p) {
     if (p === '/api/market/vendor-news' && method === 'POST') {
       const b = await readJson(req); const name = String(b.vendor || '').trim(); if (!name) return send(res, 400, { error: '缺少厂商名' })
       const desc = String(b.description || '').slice(0, 200), alias = String(b.aliases || '').slice(0, 120)
-      const prompt = '请给出中国 IT 运维 / 数据中心 / AI 领域厂商「' + name + '」' + (desc ? '（' + desc + '）' : '') + (alias ? '，别名 ' + alias : '') + ' 最近的 3-5 条动态（产品发布 / 融资并购 / 合作签约 / 市场与技术进展）。严格每行一条，格式：日期(YYYY-MM，不确定填大致时间)|标题|一句话摘要。只输出条目行，不要多余文字；若确实不了解该厂商，只输出一行：未知|暂不了解该厂商|—'
-      let txt = ''
-      try { txt = await ai('你是行业情报助手，输出简洁、不编造、不了解就如实说明。', prompt, 700, (process.env.VENDOR_NEWS_MODEL || 'deepseek/deepseek-chat')) }
-      catch (e) { return send(res, 502, { error: 'AI 生成失败：' + e.message }) }
-      const items = String(txt).split(/\r?\n/).map(function (l) { return l.trim() }).filter(function (l) { return l && l.indexOf('|') >= 0 }).map(function (l) {
-        const p = l.split('|').map(function (x) { return x.trim() }); if (!p[0] || p[0].indexOf('未知') >= 0) return null
-        return { date: (p[0] || '').slice(0, 10), title: (p[1] || '').slice(0, 120), summary: (p[2] || '').slice(0, 300), source: 'AI整理' }
+      const model = process.env.VENDOR_NEWS_MODEL || 'perplexity/sonar-pro-search'
+      const prompt = '请联网检索中国 IT 运维 / 数据中心 / AI 领域厂商「' + name + '」' + (desc ? '（' + desc + '）' : '') + (alias ? '，别名 ' + alias : '') + ' 最近的 3-5 条真实动态（产品发布 / 融资并购 / 合作签约 / 市场与技术进展），优先近 1-2 年、越新越好。严格每行一条，格式：日期(YYYY-MM 或 YYYY-MM-DD)|标题|一句话摘要|来源网址。只输出条目行，不要多余文字；每条尽量给真实可访问来源网址；完全查不到就只输出一行：未知|暂无可靠动态|—|'
+      const reqBody = { model, messages: [{ role: 'system', content: '你是行业情报检索助手，联网检索后据实回答，给出可核实来源，不编造。' }, { role: 'user', content: prompt }], max_tokens: 900, temperature: 0.2 }
+      if (!/sonar|perplexity/i.test(model)) reqBody.plugins = [{ id: 'web', max_results: 5 }]
+      const ctl = new AbortController(); const to = setTimeout(() => { try { ctl.abort() } catch (_) {} }, Number(process.env.VENDOR_NEWS_TIMEOUT_MS || 90000))
+      let txt = '', cites = []
+      try {
+        const r = await fetch(OR_URL + '/chat/completions', { method: 'POST', headers: { 'authorization': 'Bearer ' + OR_KEY, 'content-type': 'application/json', 'x-title': 'Vendor News' }, body: JSON.stringify(reqBody), signal: ctl.signal })
+        if (!r.ok) return send(res, 502, { error: 'AI 检索失败 ' + r.status + ' ' + (await r.text().catch(() => '')).slice(0, 150) })
+        const j2 = await r.json(); const msg = (j2.choices && j2.choices[0] && j2.choices[0].message) || {}
+        txt = msg.content || ''
+        const ann = msg.annotations || (j2.choices && j2.choices[0] && j2.choices[0].annotations) || []
+        cites = ann.map(function (a) { return (a && a.url_citation) ? { url: a.url_citation.url, title: a.url_citation.title || '' } : (a && a.url ? { url: a.url, title: a.title || '' } : null) }).filter(Boolean)
+      } catch (e) { return send(res, 502, { error: 'AI 检索失败：' + ((e && e.message) || e) }) } finally { clearTimeout(to) }
+      const isUrl = function (x) { return /^https?:\/\/\S+$/.test(x) }
+      const items = String(txt).split(/\r?\n/).map(function (l) { return l.trim() }).filter(function (l) { return l && l.indexOf('|') >= 0 }).map(function (l, idx) {
+        const pp = l.split('|').map(function (x) { return x.trim() }); if (!pp[0] || pp[0].indexOf('未知') >= 0) return null
+        let url = (pp[3] || '').trim(); if (!isUrl(url)) url = ''
+        if (!url && cites[idx]) url = cites[idx].url
+        return { date: (pp[0] || '').slice(0, 12), title: (pp[1] || '').slice(0, 120), summary: (pp[2] || '').slice(0, 300), url: (url || '').slice(0, 400), source: 'AI联网' }
       }).filter(Boolean)
-      return send(res, 200, { ok: true, items })
+      return send(res, 200, { ok: true, items, citations: cites.slice(0, 8) })
     }
     return send(res, 404, { error: 'no such market api' })
   } catch (e) { LOG('market 处理异常：' + (e && e.stack || e)); return send(res, 500, { error: String((e && e.message) || e) }) }
