@@ -18,9 +18,9 @@ let DATA_DIR, LOG, FILE, db = null
 
 const DEFAULT_SOURCES = [
   { name: 'InfoQ 中文', url: 'https://www.infoq.cn/feed' },
-  { name: '少数派', url: 'https://sspai.com/feed' },
+  { name: '开源中国', url: 'https://www.oschina.net/news/rss' },
+  { name: '极客公园', url: 'https://www.geekpark.net/rss' },
   { name: '钛媒体', url: 'https://www.tmtpost.com/rss.xml' },
-  { name: '爱范儿', url: 'https://www.ifanr.com/feed' },
 ]
 
 function init(opts) {
@@ -124,6 +124,8 @@ async function ai(system, user, maxTokens, model) {
 const SYS_MARKET = '你是售前团队的市场情报分析助手。用中文、简洁专业、只依据给定材料，不编造。输出用轻量 Markdown（可用小标题、列表、表格）。'
 
 /* ---------- 抓取任务 ---------- */
+const OPS_KW = ['运维', '监控', '可观测', 'observability', 'apm', 'aiops', 'itom', 'itsm', 'cmdb', '自动化运维', '运维平台', '运维服务', '告警', '日志', '链路追踪', '云运维', 'sre', 'devops', '稳定性', '故障', '巡检', '资产管理', '智能运维', '一体化运维', '监控平台', '运维管理', '数据中心运维', 'ITOM']
+function isOpsRelevant(t) { t = String(t || '').toLowerCase(); for (const k of OPS_KW) { if (t.indexOf(k) >= 0) return true } return false }
 async function runFetch() {
   const seen = new Set(db.items.map(i => i.url).filter(Boolean))
   let added = 0
@@ -134,7 +136,7 @@ async function runFetch() {
       const xml = decode(res.buf, res.enc || res.contentType)
       if (!/<(rss|feed)/i.test(xml.slice(0, 500))) continue
       for (const it of parseFeed(xml)) {
-        if (!it.url || seen.has(it.url)) continue
+        if (!it.url || seen.has(it.url) || !isOpsRelevant(it.title + ' ' + (it.summary || ''))) continue
         seen.add(it.url); added++
         db.items.unshift({ id: uid('i'), sourceId: s.id, sourceName: s.name, title: it.title, url: it.url, summary: it.summary, published: it.published, publishedTs: it.publishedTs, points: [], fetchedAt: Date.now() })
       }
@@ -150,7 +152,7 @@ async function makeDigest() {
   if (!pool.length) return null
   const mat = pool.map(i => '- ' + i.title + '（' + i.sourceName + '）' + (i.summary ? '：' + i.summary.slice(0, 80) : '')).join('\n')
   let out = ''
-  try { out = await ai(SYS_MARKET + ' 请生成「每日市场动态简报」：先 3-5 条要点综述，再按【政策/技术趋势】【竞品/厂商动态】【其他值得关注】归类点名，最后给售前 1-2 条行动建议。控制在 500 字内。', '今日资讯：\n' + mat, 900) } catch (e) { out = '（AI 摘要生成失败：' + e.message + '）' }
+  try { out = await ai(SYS_MARKET + ' 请生成「IT运维市场每日简报」：先 3-5 条要点综述，聚焦【运维平台/工具市场】【运维服务市场】【AIOps·可观测·自动化技术趋势】【厂商与并购】并点名相关厂商，最后给售前投标 1-2 条行动建议。控制在 500 字内。', '今日资讯：\n' + mat, 900) } catch (e) { out = '（AI 摘要生成失败：' + e.message + '）' }
   const ex = db.briefs.find(b => b.type === 'digest' && b.title === '每日市场动态 · ' + day)
   const rec = { id: ex ? ex.id : uid('b'), type: 'digest', title: '每日市场动态 · ' + day, output: out, createdAt: Date.now() }
   if (ex) Object.assign(ex, rec); else db.briefs.unshift(rec)
@@ -201,8 +203,8 @@ async function handle(req, res, p) {
       const title = String(b.title || '').trim() || (type === 'compare' ? '竞品对比' : '行业简报')
       let out
       const task = type === 'compare'
-        ? '请输出一份专业的「竞品对比分析报告」，用 Markdown，结构：\n## 核心结论\n（2-3 句概述我方相对位置与关键判断）\n## 对比矩阵\n用表格：首列为对比维度（产品定位、核心功能、技术与架构、信创/合规适配、性能与稳定性、价格/报价、交付与服务、生态与案例、综合优劣势），其余列为我方及各竞品；单元格写要点，材料没有的填“—”，不得编造数字。\n## 我方优势\n（2-4 条）\n## 我方短板与风险\n（2-4 条）\n## 应对与打法建议\n（3-5 条，落到可执行动作）\n## 数据说明\n（一行，说明信息来源与缺口）'
-        : '请输出一份专业的「行业与政策简报」，用 Markdown，结构：\n## 执行摘要\n（3-4 句要点）\n## 政策与监管环境\n## 技术与产品趋势\n## 竞争与厂商动态\n## 对售前投标的启示\n（3-5 条可执行建议）\n## 信息来源\n（列出所依据的条目标题）\n要点式表达，只依据给定材料，缺失的不编造，控制在 700 字内。'
+        ? '请输出一份专业的「运维厂商 / 平台 / 服务 对比分析报告」，用 Markdown，结构：\n## 核心结论\n（2-3 句概述我方相对位置与关键判断）\n## 对比矩阵\n用表格：首列为对比维度（产品定位、核心功能、技术与架构、信创/合规适配、性能与稳定性、价格/报价、交付与服务、生态与案例、综合优劣势），其余列为我方及各竞品；单元格写要点，材料没有的填“—”，不得编造数字。\n## 我方优势\n（2-4 条）\n## 我方短板与风险\n（2-4 条）\n## 应对与打法建议\n（3-5 条，落到可执行动作）\n## 数据说明\n（一行，说明信息来源与缺口）'
+        : '请输出一份专业的「IT运维市场简报」，用 Markdown，结构：\n## 执行摘要\n（3-4 句要点）\n## 运维平台 / 工具市场\n## 运维服务市场\n## 技术趋势（AIOps / 可观测 / 自动化）\n## 厂商与竞争动态\n## 对售前投标的启示\n（3-5 条可执行建议）\n## 信息来源\n（列出所依据的条目标题）\n聚焦 IT 运维领域，只依据给定材料，缺失不编造，控制在 700 字内。'
       try { out = await ai(SYS_MARKET + ' ' + task, mat, 1600) } catch (e) { return send(res, 502, { error: 'AI 整理失败：' + e.message }) }
       const brief = { id: uid('b'), type, title, output: out, refs: b.itemIds || [], createdAt: Date.now() }
       db.briefs.unshift(brief); prune(); save(); return send(res, 200, { ok: true, brief })

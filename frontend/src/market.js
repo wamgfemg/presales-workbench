@@ -37,36 +37,44 @@
   }
 
   /* ================= 市场情报：报告清单 ================= */
+  var MK_PAGE = 0
+  function mkReports() { return (MKT.briefs || []).filter(function (b) { return b.type !== 'digest' }).slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0) }) }
+  function mkFeatCard(b) {
+    var tag = b.type === 'compare' ? '<span class="mk-badge mk-badge-c">运维厂商/平台对比</span>' : '<span class="mk-badge mk-badge-b">IT运维市场简报</span>'
+    var prev = String(b.output || '').replace(/[#*>|`-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90)
+    return '<div class="mk-feat" onclick="viewReport(\'' + b.id + '\')">' + tag + '<div class="mk-feat-t">' + esc(b.title) + '</div><div class="mk-feat-p">' + esc(prev) + '…</div><div class="mk-feat-m">' + dt(b.createdAt) + (b.refs && b.refs.length ? ' · 基于 ' + b.refs.length + ' 条素材' : '') + '</div></div>'
+  }
+  function mkItemRow(it) {
+    return '<div class="mk-item"><div class="mk-item-h">' + (it.url ? '<a href="' + esc(it.url) + '" target="_blank">' + esc(it.title) + '</a>' : esc(it.title)) + '</div>' +
+      '<div class="mk-item-m"><span class="tag">' + esc(it.sourceName || '') + '</span> ' + esc(it.published || dayStr(it.fetchedAt)) + (canEditMarket() ? ' <button class="btn sm ghost" style="float:right;padding:2px 8px" onclick="mkDelItem(\'' + it.id + '\')">删除</button>' : '') + '</div>' +
+      (it.summary ? '<div class="mk-item-s">' + esc(it.summary) + '</div>' : '') + '</div>'
+  }
+  function renderMkHist(reports) {
+    var box = document.getElementById('mkHist'); if (!box) return
+    reports = reports || mkReports()
+    var PS = 8, pages = Math.max(1, Math.ceil(reports.length / PS)); if (MK_PAGE >= pages) MK_PAGE = pages - 1; if (MK_PAGE < 0) MK_PAGE = 0
+    var slice = reports.slice(MK_PAGE * PS, MK_PAGE * PS + PS)
+    var rows = slice.map(function (b) { return '<tr class="mk-row" onclick="viewReport(\'' + b.id + '\')"><td class="mk-rt-title"><b>' + esc(b.title) + '</b></td><td>' + (b.type === 'compare' ? '<span class="mk-badge mk-badge-c">对比</span>' : '<span class="mk-badge mk-badge-b">简报</span>') + '</td><td class="mk-rt-time">' + dt(b.createdAt) + '</td><td>' + (canEditMarket() ? '<button class="btn sm ghost" onclick="event.stopPropagation();mkDelBrief(\'' + b.id + '\')">删除</button>' : '') + '</td></tr>' }).join('')
+    box.innerHTML = '<div style="overflow-x:auto"><table class="mk-reports"><tr><th>报告</th><th style="width:88px">类型</th><th style="width:150px">时间</th><th style="width:64px">操作</th></tr>' + (rows || '<tr><td colspan="4" class="empty">暂无历史报告</td></tr>') + '</table></div>'
+      + '<div class="mk-pager"><button class="btn sm ghost" onclick="mkGoPage(-1)"' + (MK_PAGE <= 0 ? ' disabled' : '') + '>‹ 上一页</button><span>第 ' + (MK_PAGE + 1) + ' / ' + pages + ' 页 · 共 ' + reports.length + ' 份</span><button class="btn sm ghost" onclick="mkGoPage(1)"' + (MK_PAGE >= pages - 1 ? ' disabled' : '') + '>下一页 ›</button></div>'
+  }
+  window.mkGoPage = function (d) { var reports = mkReports(); var PS = 8, pages = Math.max(1, Math.ceil(reports.length / PS)); MK_PAGE = Math.min(pages - 1, Math.max(0, MK_PAGE + d)); renderMkHist(reports) }
+
   window.renderMarket = function () {
     var el = document.getElementById('marketBody'); if (!el) return
     api('/api/market').then(function (r) {
       if (r.status !== 200) { el.innerHTML = '<div class="card"><div class="empty">加载失败或无权限</div></div>'; return }
       MKT = r.body; var E = canEditMarket(); var st = MKT.stats || {}
-      var toolbar = '<div class="mk-toolbar">'
-        + (E ? '<button class="btn sm" id="mkFetchBtn" onclick="mkFetchNow()">⟳ 立即抓取</button><button class="btn sm" onclick="openMkGen()">＋ 生成报告</button><button class="btn sm ghost" onclick="openMkImport()">📥 录入资料</button>' : '')
-        + '<button class="btn sm ghost" onclick="openMkSources()">🔗 资讯来源</button></div>'
-      var head = '<div class="mk-page-head"><div class="mk-stats">共 <b>' + (MKT.items || []).length + '</b> 条资讯 · 上次抓取 ' + (st.lastRun ? dt(st.lastRun) : '从未') + '</div>' + toolbar + '</div>'
-      var reports = (MKT.briefs || []).filter(function (b) { return b.type !== 'digest' })
-      var table
-      if (!reports.length) {
-        table = '<div class="card"><div class="empty">还没有报告。点右上「＋ 生成报告」，勾选近期资讯或粘贴素材，AI 会生成竞品对比表 / 行业简报。<div style="margin-top:12px">' + (E ? '<button class="btn" onclick="openMkGen()">＋ 生成报告</button>' : '') + '</div></div></div>'
-      } else {
-        var rows = reports.map(function (b) {
-          var tag = b.type === 'compare' ? '<span class="mk-badge mk-badge-c">竞品对比</span>' : '<span class="mk-badge mk-badge-b">行业简报</span>'
-          var prev = String(b.output || '').replace(/[#*`>|]/g, ' ').replace(/[-]{2,}/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70)
-          return '<tr class="mk-row" onclick="viewReport(\'' + b.id + '\')">'
-            + '<td class="mk-rt-title"><b>' + esc(b.title) + '</b><div class="mk-rt-prev">' + esc(prev) + '…</div></td>'
-            + '<td>' + tag + '</td>'
-            + '<td class="mk-rt-time">' + dt(b.createdAt) + '</td>'
-            + '<td class="mk-rt-cnt">' + ((b.refs && b.refs.length) || '—') + '</td>'
-            + '<td>' + (E ? '<button class="btn sm ghost" onclick="event.stopPropagation();mkDelBrief(\'' + b.id + '\')">删除</button>' : '') + '</td></tr>'
-        }).join('')
-        table = '<div class="card mk-reports-card"><div style="overflow-x:auto"><table class="mk-reports"><tr><th>报告</th><th style="width:96px">类型</th><th style="width:150px">生成时间</th><th style="width:64px">素材</th><th style="width:72px">操作</th></tr>' + rows + '</table></div></div>'
-      }
-      el.innerHTML = head + table
+      var toolbar = '<div class="mk-toolbar">' + (E ? '<button class="btn sm" id="mkFetchBtn" onclick="mkFetchNow()">⟳ 立即抓取</button><button class="btn sm" onclick="openMkGen()">＋ 生成报告</button><button class="btn sm ghost" onclick="openMkImport()">📥 录入资料</button>' : '') + '<button class="btn sm ghost" onclick="openMkSources()">🔗 资讯来源</button></div>'
+      var reports = mkReports()
+      var head = '<div class="mk-page-head"><div class="mk-stats">共 <b>' + (MKT.items || []).length + '</b> 条 IT运维资讯 · ' + reports.length + ' 份报告 · 上次抓取 ' + (st.lastRun ? dt(st.lastRun) : '从未') + '</div>' + toolbar + '</div>'
+      var featHtml = '<div class="card"><div class="cmp-head"><h3 style="margin:0">📊 最新报告</h3></div>' + (reports.slice(0, 3).map(mkFeatCard).join('') || '<div class="empty">还没有报告，点右上「＋ 生成报告」生成 IT运维市场简报 / 运维厂商对比。</div>') + '</div>'
+      var itemsHtml = '<div class="card"><div class="cmp-head"><h3 style="margin:0">📡 最新抓取资讯（IT运维）</h3><span class="tag">' + (MKT.items || []).length + ' 条</span></div>' + ((MKT.items || []).slice(0, 15).map(mkItemRow).join('') || '<div class="empty">暂无资讯，点「⟳ 立即抓取」。</div>') + '</div>'
+      var histHtml = '<div class="card"><div class="cmp-head"><h3 style="margin:0">🗂 历史报告</h3></div><div id="mkHist"></div></div>'
+      el.innerHTML = head + featHtml + itemsHtml + histHtml
+      renderMkHist(reports)
     })
   }
-
   /* ---- 报告详情 ---- */
   window.viewReport = function (id) {
     var b = (MKT.briefs || []).find(function (x) { return x.id === id }); if (!b) return
