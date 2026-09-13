@@ -30,13 +30,14 @@ const MODULES = [
   { key: 'marketdaily', label: '厂商动态' },
   { key: 'aidaily', label: 'AI应用日报' },
   { key: 'scenario', label: '解决方案创新场景' },
+  { key: 'sales', label: '销售培训' },
 ]
 const MODULE_KEYS = MODULES.map(m => m.key)
 const LABEL = k => (MODULES.find(m => m.key === k) || {}).label || k
 // 业务集合 key → 所属模块（写权限判定用）
 const STATE_KEY_MODULE = {
   projects: 'projects', tasks: 'projects', followups: 'projects',
-  requirements: 'requirements', stakeholders: 'stakeholders', competitors: 'market',
+  requirements: 'requirements', stakeholders: 'stakeholders', competitors: 'market', salesTraining: 'sales',
   contracts: 'contracts', quotations: 'quotations', compintel: 'compintel',
   kb: 'kb', kbTree: 'kb', pdocs: 'pdocs', docs: 'docs', checklists: 'tools',
 }

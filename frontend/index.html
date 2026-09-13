@@ -32,6 +32,7 @@
       <button data-p="docs"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L18.5 9.5l-4-4L4 16z"/><path d="M13.5 5.5l4 4"/></svg></span>方案制作中心</button>
       <!-- 需求管理入口已按需求隐藏（保留 DOM 与逻辑，去掉下一行的 style 即可恢复） -->
       <button data-p="requirements"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6l1 1 1.8-2M4.5 11.5l1 1 1.8-2M4.5 17l1 1 1.8-2"/></svg></span>需求管理</button>
+      <button data-p="sales"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l9-4 9 4-9 4z"/><path d="M7 10.5V15c0 1.2 2.2 2.2 5 2.2s5-1 5-2.2v-4.5"/><path d="M21 8.5v5"/></svg></span>销售培训</button>
       <button data-p="users" style="display:none"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 2.6V11c0 4.4-2.9 7.4-7 8.9-4.1-1.5-7-4.5-7-8.9V5.6z"/><path d="M9.5 11.5l1.8 1.8 3.5-3.6"/></svg></span>用户管理</button>
     </nav>
     <div class="side-foot">
@@ -322,6 +323,12 @@
     <section class="page" id="p-scenario">
       <div class="page-head"><div><h2>解决方案创新场景</h2><div class="desc">抓取软件解决方案 / 创新场景资讯，AI 提炼成结构化「创新场景卡」，供方案与投标借鉴</div></div></div>
       <div id="scenarioBody"></div>
+    </section>
+
+    <!-- ============ 销售培训 ============ -->
+    <section class="page" id="p-sales">
+      <div class="page-head"><div><h2>销售培训</h2><div class="desc">记录对销售团队的培训（产品/方案/技巧/竞品等），并按类型、产品线、讲师、月份统计分析</div></div></div>
+      <div id="salesBody"></div>
     </section>
 
     <!-- ============ 报价管理 ============ -->
@@ -687,6 +694,25 @@
     <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mVendorDyn')">取消</button><button class="btn" style="margin-left:10px" onclick="saveAddDyn()">保存入库</button></div>
   </div></div>
 
+  <div class="mask" id="mSales"><div class="modal">
+    <h3><span id="salesModalTitle">新增培训</span><button class="x" onclick="closeMask('mSales')">✕</button></h3>
+    <input type="hidden" id="saId">
+    <div class="grid g2">
+      <label class="f"><span>培训主题 *</span><input id="saTopic"></label>
+      <label class="f"><span>类型</span><select id="saType"></select></label>
+      <label class="f"><span>关联产品线 / 解决方案</span><input id="saSol" placeholder="如 数据中心DCIM / 智能运维"></label>
+      <label class="f"><span>讲师</span><input id="saTrainer"></label>
+      <label class="f"><span>日期</span><input id="saDate" type="date"></label>
+      <label class="f"><span>时长(小时)</span><input id="saHours" type="number" step="0.5"></label>
+      <label class="f"><span>参与人数</span><input id="saCount" type="number"></label>
+      <label class="f"><span>形式</span><select id="saFormat"></select></label>
+    </div>
+    <label class="f"><span>参与销售名单（逗号分隔）</span><input id="saAtt"></label>
+    <label class="f"><span>考核 / 反馈</span><textarea id="saFb" rows="2"></textarea></label>
+    <label class="f"><span>备注</span><textarea id="saNotes" rows="2"></textarea></label>
+    <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mSales')">取消</button><button class="btn" style="margin-left:10px" onclick="saveSales()">保存</button></div>
+  </div></div>
+
 <script src="./src/main.js"></script>
   <!-- 向量知识库：接入 WeKnora 真实知识库，覆盖 main.js 中的本地模拟逻辑 -->
   <script src="./src/kb-weknora.js"></script>
@@ -697,5 +723,6 @@
 <script src="./src/market.js"></script>
 <script src="./src/aidaily.js"></script>
 <script src="./src/scenario.js"></script>
+<script src="./src/sales.js"></script>
 </body>
 </html>
