@@ -65,7 +65,7 @@
     api('/api/market').then(function (r) {
       if (r.status !== 200) { el.innerHTML = '<div class="card"><div class="empty">加载失败或无权限</div></div>'; return }
       MKT = r.body; var E = canEditMarket(); var st = MKT.stats || {}
-      var toolbar = '<div class="mk-toolbar">' + (E ? '<button class="btn sm" id="mkFetchBtn" onclick="mkFetchNow()">⟳ 立即抓取</button><button class="btn sm" onclick="openMkGen()">＋ 生成报告</button><button class="btn sm ghost" onclick="openMkImport()">📥 录入资料</button>' : '') + '<button class="btn sm ghost" onclick="openMkSources()">🔗 资讯来源</button></div>'
+      var toolbar = '<div class="mk-toolbar">' + (E ? '<button class="btn sm" id="mkFetchBtn" onclick="mkFetchNow()">⟳ 立即抓取</button><button class="btn sm" id="mkOpsBtn" onclick="mkOpsNews(this)">🌐 联网检索</button><button class="btn sm" onclick="openMkGen()">＋ 生成报告</button><button class="btn sm ghost" onclick="openMkImport()">📥 录入资料</button>' : '') + '<button class="btn sm ghost" onclick="openMkSources()">🔗 资讯来源</button></div>'
       var reports = mkReports()
       var head = '<div class="mk-page-head"><div class="mk-stats">共 <b>' + (MKT.items || []).length + '</b> 条 IT运维资讯 · ' + reports.length + ' 份报告 · 上次抓取 ' + (st.lastRun ? dt(st.lastRun) : '从未') + '</div>' + toolbar + '</div>'
       var featHtml = '<div class="card"><div class="cmp-head"><h3 style="margin:0">📊 最新报告</h3></div>' + (reports.slice(0, 3).map(mkFeatCard).join('') || '<div class="empty">还没有报告，点右上「＋ 生成报告」生成 IT运维市场简报 / 运维厂商对比。</div>') + '</div>'
@@ -90,6 +90,7 @@
   /* ---- 抓取 ---- */
   window.mkFetchNow = function () { var b = document.getElementById('mkFetchBtn'); if (b) { b.disabled = true; b.textContent = '抓取中…' } api('/api/market/fetch', { method: 'POST', body: '{}' }).then(function (r) { if (b) { b.disabled = false; b.textContent = '⟳ 立即抓取' } if (r.status === 200) { toast('抓取完成，新增 ' + (r.body.added || 0) + ' 条'); renderMarket() } else toast((r.body && r.body.error) || '抓取失败') }).catch(function () { if (b) { b.disabled = false; b.textContent = '⟳ 立即抓取' } toast('抓取失败') }) }
 
+  window.mkOpsNews=function(btn){ if(btn){btn.disabled=true;btn.textContent='检索中…'} toast('联网检索 IT运维动态中，约需 1 分钟…'); api('/api/market/ops-news',{method:'POST',body:'{}'}).then(function(r){ if(btn){btn.disabled=false;btn.textContent='🌐 联网检索'} if(r.status===200){toast('检索完成，新增 '+(r.body.added||0)+' 条');renderMarket()} else toast((r.body&&r.body.error)||'检索失败') }).catch(function(){ if(btn){btn.disabled=false;btn.textContent='🌐 联网检索'} toast('检索失败') }) }
   /* ---- 资讯来源（弹窗） ---- */
   function renderSourcesModal() {
     var rows = (MKT.sources || []).map(function (s) {

@@ -211,6 +211,30 @@ async function handle(req, res, p) {
     }
     if (p.startsWith('/api/market/item/') && method === 'DELETE') { const id = decodeURIComponent(p.slice('/api/market/item/'.length)); db.items = db.items.filter(i => i.id !== id); save(); return send(res, 200, { ok: true }) }
     if (p.startsWith('/api/market/brief/') && method === 'DELETE') { const id = decodeURIComponent(p.slice('/api/market/brief/'.length)); db.briefs = (db.briefs || []).filter(i => i.id !== id); save(); return send(res, 200, { ok: true }) }
+    if (p === '/api/market/ops-news' && method === 'POST') {
+      if (!OR_KEY) return send(res, 503, { error: '未配置 OPENROUTER_API_KEY' })
+      const model = process.env.VENDOR_NEWS_MODEL || 'perplexity/sonar-pro-search'
+      const prompt = '请联网检索中国「IT运维 / 运维平台 / 运维服务 / 可观测 / AIOps / 智能运维」市场最近 1-2 个月的 5-8 条真实动态（厂商产品发布、融资并购、市场报告、合作签约、政策）。严格每行一条，格式：日期(YYYY-MM)|标题|一句话摘要|来源网址。只输出条目行，不要多余文字。'
+      const reqBody = { model, messages: [{ role: 'system', content: '行业情报检索助手，联网检索据实回答，给可核实来源，不编造。' }, { role: 'user', content: prompt }], max_tokens: 1200, temperature: 0.2 }
+      if (!/sonar|perplexity/i.test(model)) reqBody.plugins = [{ id: 'web', max_results: 6 }]
+      const ctl = new AbortController(); const to = setTimeout(() => { try { ctl.abort() } catch (_) {} }, Number(process.env.VENDOR_NEWS_TIMEOUT_MS || 90000))
+      let txt = '', ann = []
+      try {
+        const r = await fetch(OR_URL + '/chat/completions', { method: 'POST', headers: { 'authorization': 'Bearer ' + OR_KEY, 'content-type': 'application/json', 'x-title': 'Ops News' }, body: JSON.stringify(reqBody), signal: ctl.signal })
+        if (!r.ok) return send(res, 502, { error: 'AI 检索失败 ' + r.status })
+        const j = await r.json(); const msg = (j.choices && j.choices[0] && j.choices[0].message) || {}
+        txt = msg.content || ''; ann = msg.annotations || []
+      } catch (e) { return send(res, 502, { error: 'AI 检索失败：' + ((e && e.message) || e) }) } finally { clearTimeout(to) }
+      const isUrl = function (x) { return /^https?:\/\/\S+$/.test(x) }
+      const seen = new Set(db.items.map(i => i.url).filter(Boolean)); let added = 0
+      String(txt).split(/\r?\n/).map(function (l) { return l.trim() }).filter(function (l) { return l && l.indexOf('|') >= 0 }).forEach(function (l, idx) {
+        const pp = l.split('|').map(function (x) { return x.trim() }); if (!pp[1]) return
+        let url = (pp[3] || '').trim(); if (!isUrl(url)) url = (ann[idx] && ann[idx].url_citation && ann[idx].url_citation.url) || ''
+        if (url && seen.has(url)) return; if (url) seen.add(url)
+        added++; db.items.unshift({ id: uid('i'), sourceId: 'ai', sourceName: 'AI联网', title: (pp[1] || '').slice(0, 200), url: url, summary: (pp[2] || '').slice(0, 400), published: (pp[0] || '').slice(0, 12), publishedTs: 0, points: '', fetchedAt: Date.now() })
+      })
+      prune(); save(); return send(res, 200, { ok: true, added, total: db.items.length })
+    }
     if (p === '/api/market/vendor-news' && method === 'POST') {
       const b = await readJson(req); const name = String(b.vendor || '').trim(); if (!name) return send(res, 400, { error: '缺少厂商名' })
       const desc = String(b.description || '').slice(0, 200), alias = String(b.aliases || '').slice(0, 120)
