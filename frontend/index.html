@@ -34,6 +34,7 @@
       <button data-p="requirements"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6l1 1 1.8-2M4.5 11.5l1 1 1.8-2M4.5 17l1 1 1.8-2"/></svg></span>需求管理</button>
       <button data-p="sales"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l9-4 9 4-9 4z"/><path d="M7 10.5V15c0 1.2 2.2 2.2 5 2.2s5-1 5-2.2v-4.5"/><path d="M21 8.5v5"/></svg></span>销售培训</button>
       <button data-p="toolbox"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/></svg></span>售前工具箱</button>
+      <button data-p="capability"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg></span>能力提升</button>
       <button data-p="users" style="display:none"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 2.6V11c0 4.4-2.9 7.4-7 8.9-4.1-1.5-7-4.5-7-8.9V5.6z"/><path d="M9.5 11.5l1.8 1.8 3.5-3.6"/></svg></span>用户管理</button>
     </nav>
     <div class="side-foot">
@@ -336,6 +337,12 @@
     <section class="page" id="p-toolbox">
       <div class="page-head"><div><h2>售前工具箱</h2><div class="desc">按解决方案组织售前文档：选择解决方案，在左侧分类树的具体节点上传/下载彩页、手册、白皮书、案例、模板等资料</div></div></div>
       <div id="toolboxBody"></div>
+    </section>
+
+    <!-- ============ 能力提升 ============ -->
+    <section class="page" id="p-capability">
+      <div class="page-head"><div><h2>能力提升</h2><div class="desc">沉淀售前咨询必备常识（方法论、方案编写、招投标、行业与客户沟通等）并按分类归档售前人员能力培训材料，团队成员可查阅与下载</div></div></div>
+      <div id="capabilityBody"></div>
     </section>
 
     <!-- ============ 报价管理 ============ -->
@@ -719,6 +726,17 @@
     <label class="f"><span>备注</span><textarea id="saNotes" rows="2"></textarea></label>
     <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mSales')">取消</button><button class="btn" style="margin-left:10px" onclick="saveSales()">保存</button></div>
   </div></div>
+  <div class="mask" id="mCap"><div class="modal">
+    <h3><span id="capModalTitle">新增常识</span><button class="x" onclick="closeMask('mCap')">✕</button></h3>
+    <input type="hidden" id="ckId">
+    <div class="grid g2">
+      <label class="f"><span>标题 *</span><input id="ckTitle" placeholder="如：售前五步法 / 点对点应答与废标红线"></label>
+      <label class="f"><span>分类</span><select id="ckCat"></select></label>
+    </div>
+    <label class="f"><span>标签（逗号分隔）</span><input id="ckTags" placeholder="方法论,投标,废标"></label>
+    <label class="f"><span>正文要点（支持 **加粗** / [链接](url) / `代码`）</span><textarea id="ckContent" rows="8"></textarea></label>
+    <div style="text-align:right"><button class="btn ghost" onclick="closeMask('mCap')">取消</button><button class="btn" style="margin-left:10px" onclick="saveCap()">保存</button></div>
+  </div></div>
 
 <script src="./src/main.js"></script>
   <!-- 向量知识库：接入 WeKnora 真实知识库，覆盖 main.js 中的本地模拟逻辑 -->
@@ -732,5 +750,6 @@
 <script src="./src/scenario.js"></script>
 <script src="./src/sales.js"></script>
 <script src="./src/toolbox.js"></script>
+<script src="./src/capability.js"></script>
 </body>
 </html>

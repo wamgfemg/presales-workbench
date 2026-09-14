@@ -32,13 +32,14 @@ const MODULES = [
   { key: 'scenario', label: '解决方案创新场景' },
   { key: 'sales', label: '销售培训' },
   { key: 'toolbox', label: '售前工具箱' },
+  { key: 'capability', label: '能力提升' },
 ]
 const MODULE_KEYS = MODULES.map(m => m.key)
 const LABEL = k => (MODULES.find(m => m.key === k) || {}).label || k
 // 业务集合 key → 所属模块（写权限判定用）
 const STATE_KEY_MODULE = {
   projects: 'projects', tasks: 'projects', followups: 'projects',
-  requirements: 'requirements', stakeholders: 'stakeholders', competitors: 'market', salesTraining: 'sales', toolbox: 'toolbox',
+  requirements: 'requirements', stakeholders: 'stakeholders', competitors: 'market', salesTraining: 'sales', toolbox: 'toolbox', capability: 'capability',
   contracts: 'contracts', quotations: 'quotations', compintel: 'compintel',
   kb: 'kb', kbTree: 'kb', pdocs: 'pdocs', docs: 'docs', checklists: 'tools',
 }
@@ -123,7 +124,7 @@ function authorize(user, p, method) {
     if (!mod) return { ok: false, error: '该操作需要管理员权限' }
     return canEdit(mod) ? { ok: true } : { ok: false, error: '对「' + LABEL(mod) + '」只有只读权限，无法保存' }
   }
-  if (p === '/api/files/upload' || p.startsWith('/api/files/')) return (canEdit('pdocs') || canEdit('contracts')) ? { ok: true } : { ok: false, error: '需要「项目知识库」或「合同管理」编辑权限' }
+  if (p === '/api/files/upload' || p.startsWith('/api/files/')) return (canEdit('pdocs') || canEdit('contracts') || canEdit('toolbox') || canEdit('capability')) ? { ok: true } : { ok: false, error: '需要「项目知识库/合同管理/售前工具箱/能力提升」编辑权限' }
   if (p === '/api/weknora/doc-category') return canEdit('kb') ? { ok: true } : { ok: false, error: '需要「向量知识库」编辑权限' }
   if (p.startsWith('/api/market')) return canEdit('market') ? { ok: true } : { ok: false, error: '需要「市场情报」编辑权限' }
   if (p.startsWith('/api/aidaily')) return canEdit('aidaily') ? { ok: true } : { ok: false, error: '需要「AI应用日报」编辑权限' }
