@@ -34,7 +34,7 @@ function projectsInView(){return fyYear==='all'?store.projects:store.projects.fi
 function setFyYear(v){
   fyYear=v||'all';try{localStorage.setItem(YEAR_LS_KEY,fyYear)}catch(e){}
   /* 年度是全局口径：一次把所有页面重渲染，避免只刷当前页导致别处口径不一致；按名字取函数，缺哪个跳过哪个 */
-  ['renderDash','renderProjects','renderChain','renderCompintel','renderQuotations','renderContracts','renderStakeholders',
+  ['renderDash','renderProjects','renderChain','renderCompintel','renderQuotations','renderContracts',
    'renderPdocs','renderTools','renderC139','renderRequirements','renderDocs'].forEach(n=>{
     try{const f=window[n];if(typeof f==='function')f()}catch(e){}
   })
@@ -118,7 +118,6 @@ function show(p){
   if(p==='docs')renderDocsPage();
   if(p==='c139')renderC139();
   if(p==='tools')renderTools();
-  if(p==='stakeholders')renderStakeholders();
   if(p==='chain')renderChain();
   if(p==='contracts')renderContracts();
   if(p==='quotations')renderQuotations();
@@ -1594,71 +1593,127 @@ function fillProjSelect(id,value=''){
   if(want)el.value=want;
 }
 
-/* ================= 干系人管理 ================= */
-let stkCell='';   // 形如 high|support，九宫格点选后的筛选条件
-function renderStakeholders(){
-  const el=document.getElementById('stkBody');
-  fillProjSelect('stkProj',currentProjectId);
-  const pid=document.getElementById('stkProj').value;
-  const p=getProj(pid);
-  if(!p){el.innerHTML='<div class="card"><div class="empty">暂无项目，请先在「项目管理」中创建</div></div>';return}
-  const all=store.stakeholders[pid]||[];
-  const cov=chainCoverage(pid);
-  const noCoach=!all.some(s=>s.role==='教练/内线');
-  const noPhone=all.filter(s=>!(s.phone||'').trim()).length;
+/* ================= 决策链（已融合原「干系人管理」：决策链视图 + 影响力矩阵 + 跨项目台账） ================= */
+let stkCell='', chainPid=null, chainRole='all', chainAtt='all', chainTab='flow';   // stkCell 形如 high|support
+function chainCoverage(pid){
+  const list=(store.stakeholders&&store.stakeholders[pid])||[];
+  const miss=KEY_ROLES.filter(r=>!list.some(s=>s.role===r));
+  return {list,miss,covered:KEY_ROLES.length-miss.length};
+}
+function influenceBadge(v){return v==='high'?'<span class="tag" style="background:#fde8ef;color:var(--bad)">高</span>':v==='low'?'<span class="tag" style="background:#e6f4ea;color:var(--ok)">低</span>':'<span class="tag">中</span>'}
+function attitudeBadge(v){return v==='support'?'<span class="tag" style="background:#e6f4ea;color:var(--ok)">支持</span>':v==='oppose'?'<span class="tag" style="background:#fde8ef;color:var(--bad)">反对</span>':v==='unknown'?'<span class="tag" style="background:#eceff5;color:#6b7488">未知</span>':'<span class="tag">中立</span>'}
+
+function renderChain(){
+  const el=document.getElementById('chainBody');if(!el)return;
+  const cys=document.getElementById('chainYearSlot');if(cys)cys.innerHTML=yearSelectHtml('chainYearSel');
+  const ps=projectsInView().filter(p=>!LOST_STAGES.includes(p.stage));
+  if(!ps.length){el.innerHTML=`<div class="card"><div class="empty">${fyYear==='all'?'暂无在跟项目':'当前年度（'+fyYear+'）没有在跟项目，可切换右上角年度'}</div></div>`;return}
+  if(!chainPid||!ps.some(p=>p.id===chainPid))chainPid=(ps.some(p=>p.id===currentProjectId)?currentProjectId:ps[0].id);
+  const p=ps.find(x=>x.id===chainPid)||ps[0], cov=chainCoverage(chainPid);
+  const opts=ps.map(x=>`<option value="${x.id}" ${x.id===chainPid?'selected':''}>${esc(x.name)}</option>`).join('');
+  const head=`<div class="chain-pagehead">
+    <div class="cp-left">
+      <select id="chainProjSel" onchange="chainPid=this.value;stkCell='';renderChain()" style="width:250px">${opts}</select>
+      <span class="cp-meta">${esc(p.customer||'')} · 已识别 ${cov.list.length} 人 · ${oppBadge(p.oppLevel)} ${stageBadge(p.stage)} · 必备角色 ${cov.covered}/${KEY_ROLES.length}</span>
+    </div>
+    <div class="cp-right"><button class="btn" onclick="openStakeholderModal(null,null,'${chainPid}')">＋ 新增关键人</button></div></div>`;
+  const TABS=[['flow','🧭 决策链视图'],['matrix','🎯 影响力矩阵'],['ledger','📋 跨项目台账']];
+  const tabs=`<div class="cap-tabs" style="margin:12px 0 14px">${TABS.map(t=>`<span class="cap-tab${chainTab===t[0]?' on':''}" onclick="chainTab='${t[0]}';renderChain()">${t[1]}</span>`).join('')}</div>`;
+  let body = chainTab==='matrix' ? stkMatrixHtml(p,cov) : chainTab==='ledger' ? stkLedgerHtml(ps) : (chainCoverageHtml(ps)+chainFlowHtml(p,cov));
+  el.innerHTML=head+tabs+body;
+}
+/* —— 页签①：决策链视图（覆盖度总览 + 单项目角色阵型）—— */
+function chainCoverageHtml(ps){
+  return `<div class="card"><h3 style="margin:0 0 12px">决策结构覆盖度 <span style="font-weight:400;font-size:12px;color:var(--sub)">（在跟 ${ps.length} 个项目 · 关键角色 ${KEY_ROLES.length} 个）</span></h3><div class="grid g4">`+
+    ps.map(pr=>{const c=chainCoverage(pr.id),full=c.covered===KEY_ROLES.length;
+      return `<div class="chain-cov ${full?'full':'lack'}${pr.id===chainPid?' on':''}" onclick="chainPid='${pr.id}';renderChain()">
+        <div class="lb">${esc(pr.name)}</div>
+        <div class="num" style="font-size:22px">${c.covered}<small style="font-size:12px;font-weight:400">/${KEY_ROLES.length}</small></div>
+        <div style="font-size:12px;color:${full?'var(--ok)':'var(--bad)'}">${full?'关键角色已覆盖':'缺：'+c.miss.join('、')}</div></div>`}).join('')+
+    `</div><div class="hint" style="margin-top:10px">关键角色取自 C139「决策结构」：${KEY_ROLES.join(' / ')}。缺口就是下一步要拜访的人，点卡片切换下方阵型。</div></div>`;
+}
+function chainFlowHtml(p,cov){
+  const groups=CHAIN_ROLES.map(r=>({r,people:cov.list.filter(s=>s.role===r)})).filter(x=>x.people.length||KEY_ROLES.includes(x.r));
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+      <div><h3 style="margin:0">${esc(p.name)} · 决策链阵型</h3><div style="font-size:12px;color:var(--sub)">按角色分组，红标为必备角色；缺角色的虚位可直接补录</div></div></div>
+    <div class="chain-flow">`+
+    groups.map(g=>{
+      const people=g.people.map(s=>{
+        const focus=s.focus?`<div class="pk"><span>关注点</span>${esc(s.focus)}</div>`:'';
+        const strat=s.strategy?`<div class="pk st"><span>我方策略</span>${esc(s.strategy)}</div>`:'';
+        const contact=[s.phone&&('📱 '+esc(s.phone)),s.wechat&&('💬 '+esc(s.wechat)),s.email&&('✉️ '+esc(s.email))].filter(Boolean).join('<br>');
+        return `<div class="chain-person"><div class="pn"><b>${esc(s.name)}</b> ${influenceBadge(s.influence)} ${attitudeBadge(s.attitude)}</div>
+          <div class="pt">${esc(s.dept||'—')}${s.title?' / '+esc(s.title):''}</div>${contact?`<div class="pc">${contact}</div>`:''}${focus}${strat}
+          <div class="pa"><button class="btn sm ghost" onclick="openStakeholderModal('${s.id}',null,'${chainPid}')">编辑</button>
+          <button class="btn sm danger" onclick="delStakeholder('${s.id}','${chainPid}')">删除</button></div></div>`}).join('');
+      const gap=`<div class="chain-person gap"><div class="pt">尚未识别</div>
+        <div class="pa"><button class="btn sm" onclick="openStakeholderModal(null,'${g.r}','${chainPid}')">补录此人</button></div></div>`;
+      const must=KEY_ROLES.includes(g.r)?'<i class="must">必备</i>':'';
+      return `<div class="chain-role ${g.people.length?'':'gap'}"><div class="rname">${g.r}${must}</div>${people||gap}</div>`;
+    }).join('')+`</div></div>`;
+}
+/* —— 页签②：影响力矩阵 + 干系人明细（原「干系人管理」）—— */
+function stkMatrixHtml(p,cov){
+  const all=cov.list;
+  const tips=[];
+  tips.push(cov.miss.length?`<span style="color:var(--bad)">必备角色缺：${cov.miss.join('、')}（覆盖 ${cov.covered}/${KEY_ROLES.length}）</span>`:`<span style="color:var(--ok)">必备角色已覆盖 ${cov.covered}/${KEY_ROLES.length}</span>`);
+  if(!all.some(s=>s.role==='教练/内线'))tips.push('<span style="color:var(--bad)">尚无教练/内线 —— 按 C139 口径无教练且无 1Win 时赢单率上限只有 50%</span>');
+  if(all.some(s=>s.attitude==='oppose'&&s.influence==='high'))tips.push('<span style="color:var(--bad)">存在高影响力反对者，需优先制定应对</span>');
+  const noPhone=all.filter(s=>!(s.phone||'').trim()&&!(s.wechat||'').trim()&&!(s.email||'').trim()).length;
+  if(noPhone)tips.push(`<span style="color:#b25e0c">${noPhone} 人未留联系方式</span>`);
   const [cellInf,cellAtt]=stkCell?stkCell.split('|'):[];
   const list=all.filter(s=>(!cellInf||s.influence===cellInf)&&(!cellAtt||(s.attitude||'neutral')===cellAtt));
-  const INF=[['high','高影响力'],['medium','中影响力'],['low','低影响力']];
-  const ATT=[['support','支持'],['neutral','中立'],['oppose','反对'],['unknown','未知']];
-  let h=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
-    <div><h3 style="margin:0">${esc(p.name)} · 干系人矩阵</h3>
-    <div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 已识别 ${all.length} 人 · ${oppBadge(p.oppLevel)} ${stageBadge(p.stage)}</div></div>
-    <div style="display:flex;gap:8px"><select id="stkProj2" onchange="document.getElementById('stkProj').value=this.value;renderStakeholders()" style="width:230px">
-      ${projectsInView().map(x=>`<option value="${x.id}" ${x.id===pid?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
-      <button class="btn" onclick="openStakeholderModal(null,null,'${pid}')">＋ 新增关键人</button></div></div>`;
-  /* 缺口与风险提示 */
-  const tips=[];
-  tips.push(cov.miss.length?`<span style="color:var(--bad)">必备角色缺：${cov.miss.join('、')}（覆盖 ${cov.covered}/${KEY_ROLES.length}）</span>`
-    :`<span style="color:var(--ok)">必备角色已覆盖 ${cov.covered}/${KEY_ROLES.length}</span>`);
-  if(noCoach)tips.push('<span style="color:var(--bad)">尚无教练/内线 —— 按 C139 口径无教练且无 1Win 时赢单率上限只有 50%</span>');
-  if(all.some(s=>s.attitude==='oppose'&&s.influence==='high'))tips.push('<span style="color:var(--bad)">存在高影响力反对者，需优先制定应对</span>');
-  if(noPhone)tips.push(`<span style="color:#b25e0c">${noPhone} 人未留联系方式</span>`);
+  const INF=[['high','高影响力'],['medium','中影响力'],['low','低影响力']], ATT=[['support','支持'],['neutral','中立'],['oppose','反对'],['unknown','未知']];
+  let h=`<div class="card"><div class="cmp-head"><h3 style="margin:0">${esc(p.name)} · 影响力 × 立场矩阵</h3><span style="font-size:12px;color:var(--sub)">已识别 ${all.length} 人</span></div>`;
   h+=`<div style="font-size:12.5px;display:flex;flex-direction:column;gap:4px;margin-bottom:12px">${tips.map(t=>`<div>· ${t}</div>`).join('')}</div>`;
-  /* 九宫格 */
   h+=`<table class="mtx"><tr><th></th>${ATT.map(a=>`<th>${a[1]}</th>`).join('')}<th>合计</th></tr>`+
     INF.map(([iv,il])=>{const row=all.filter(s=>(s.influence||'medium')===iv);
       return `<tr><th>${il}</th>`+ATT.map(([av])=>{const n=row.filter(s=>(s.attitude||'neutral')===av).length;
         const key=iv+'|'+av,on=stkCell===key;
-        return `<td class="${n?(av==='oppose'?'bad':av==='support'?'ok':'mid'):'zero'}${on?' on':''}" ${n?`onclick="stkCell='${on?'':key}';renderStakeholders()" style="cursor:pointer"`:''}>${n||'·'}</td>`}).join('')+
+        return `<td class="${n?(av==='oppose'?'bad':av==='support'?'ok':'mid'):'zero'}${on?' on':''}" ${n?`onclick="stkCell='${on?'':key}';renderChain()" style="cursor:pointer"`:''}>${n||'·'}</td>`}).join('')+
         `<td class="sum">${row.length}</td></tr>`}).join('')+
     `<tr><th>合计</th>${ATT.map(([av])=>`<td class="sum">${all.filter(s=>(s.attitude||'neutral')===av).length}</td>`).join('')}<td class="sum">${all.length}</td></tr></table>`;
-  h+=`<div class="hint" style="margin-top:8px">点格子可只看该影响力×立场的人；${stkCell?`当前筛选：<b>${stkCell.split('|')[0]==='high'?'高':stkCell.split('|')[0]==='low'?'低':'中'}影响力 · ${ATT.find(a=>a[0]===stkCell.split('|')[1])[1]}</b> <button class="btn sm ghost" onclick="stkCell='';renderStakeholders()">清除</button>`:'售前视角重点看两格：高影响力×反对（风险）与高影响力×未知（信息盲区）'}</div>`;
-  /* 明细 */
-  if(!all.length){
-    h+=`<div class="empty" style="margin-top:12px">该项目还没有记录关键人 —— 先补必备角色：`+
-      KEY_ROLES.map(r=>`<button class="btn sm ghost" style="margin:2px" onclick="openStakeholderModal(null,'${r}','${pid}')">＋ ${r}</button>`).join('')+`</div></div>`;
-    el.innerHTML=h;return}
+  h+=`<div class="hint" style="margin-top:8px">点格子可只看该影响力×立场的人；${stkCell?`当前筛选：<b>${cellInf==='high'?'高':cellInf==='low'?'低':'中'}影响力 · ${ATT.find(a=>a[0]===cellAtt)[1]}</b> <button class="btn sm ghost" onclick="stkCell='';renderChain()">清除</button>`:'售前视角重点看两格：高影响力×反对（风险）与高影响力×未知（信息盲区）'}</div>`;
+  if(!all.length){h+=`<div class="empty" style="margin-top:12px">该项目还没有记录关键人 —— 先补必备角色：`+
+      KEY_ROLES.map(r=>`<button class="btn sm ghost" style="margin:2px" onclick="openStakeholderModal(null,'${r}','${chainPid}')">＋ ${r}</button>`).join('')+`</div></div>`;return h}
   h+=`<div style="overflow-x:auto;margin-top:12px"><table><tr><th>姓名</th><th>角色</th><th>部门/职务</th><th>联系方式</th><th>影响力</th><th>立场</th><th>关注重点</th><th>我方策略</th><th>更新</th><th style="width:130px">操作</th></tr>`+
   list.map(s=>`<tr>
-    <td><b>${esc(s.name||'—')}</b></td>
-    <td>${esc(s.role||'—')}</td><td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
+    <td><b>${esc(s.name||'—')}</b></td><td>${esc(s.role||'—')}</td><td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
     <td class="stk-contact">${[s.phone&&('📱 '+esc(s.phone)),s.wechat&&('💬 '+esc(s.wechat)),s.email&&('✉️ '+esc(s.email))].filter(Boolean).join('<br>')||'<span style="color:var(--sub)">—</span>'}</td>
     <td>${influenceBadge(s.influence)}</td><td>${attitudeBadge(s.attitude)}</td>
     <td style="max-width:190px">${esc(s.focus||'')}</td><td style="max-width:210px">${esc(s.strategy||'')}</td>
     <td style="white-space:nowrap;color:var(--sub);font-size:12px">${esc(s.updated||'—')}</td>
-    <td><button class="btn sm ghost" onclick="openStakeholderModal('${s.id}',null,'${pid}')">编辑</button>
-        <button class="btn sm danger" onclick="delStakeholder('${s.id}','${pid}')">删除</button></td></tr>`).join('')+'</table></div>'+
-    (list.length!==all.length?`<div class="hint">按格子筛选后显示 ${list.length}/${all.length} 人</div>`:'')+
-    `<div style="margin-top:12px"><button class="btn ghost" onclick="chainPid='${pid}';show('chain')">查看决策链视图 →</button></div></div>`;
-  el.innerHTML=h;
+    <td><button class="btn sm ghost" onclick="openStakeholderModal('${s.id}',null,'${chainPid}')">编辑</button>
+        <button class="btn sm danger" onclick="delStakeholder('${s.id}','${chainPid}')">删除</button></td></tr>`).join('')+'</table></div>'+
+    (list.length!==all.length?`<div class="hint">按格子筛选后显示 ${list.length}/${all.length} 人</div>`:'')+`</div>`;
+  return h;
 }
-function influenceBadge(v){return v==='high'?'<span class="tag" style="background:#fde8ef;color:var(--bad)">高</span>':v==='low'?'<span class="tag" style="background:#e6f4ea;color:var(--ok)">低</span>':'<span class="tag">中</span>'}
-function attitudeBadge(v){return v==='support'?'<span class="tag" style="background:#e6f4ea;color:var(--ok)">支持</span>':v==='oppose'?'<span class="tag" style="background:#fde8ef;color:var(--bad)">反对</span>':v==='unknown'?'<span class="tag" style="background:#eceff5;color:#6b7488">未知</span>':'<span class="tag">中立</span>'}
+/* —— 页签③：跨项目关键人台账 —— */
+function stkLedgerHtml(ps){
+  const all=[];ps.forEach(x=>((store.stakeholders&&store.stakeholders[x.id])||[]).forEach(s=>all.push(Object.assign({},s,{pid:x.id,pname:x.name}))));
+  const rows=all.filter(s=>(chainRole==='all'||s.role===chainRole)&&(chainAtt==='all'||s.attitude===chainAtt));
+  return `<div class="card"><h3 style="margin:0 0 12px">关键人台账 <span style="font-weight:400;font-size:12px;color:var(--sub)">（跨在跟项目）</span></h3>
+    <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+      <select onchange="chainRole=this.value;renderChain()" style="width:150px"><option value="all">全部角色</option>${CHAIN_ROLES.map(r=>`<option ${r===chainRole?'selected':''}>${r}</option>`).join('')}</select>
+      <select onchange="chainAtt=this.value;renderChain()" style="width:140px"><option value="all">全部立场</option>
+        <option value="support" ${chainAtt==='support'?'selected':''}>支持</option><option value="neutral" ${chainAtt==='neutral'?'selected':''}>中立</option>
+        <option value="oppose" ${chainAtt==='oppose'?'selected':''}>反对</option><option value="unknown" ${chainAtt==='unknown'?'selected':''}>未知</option></select>
+      <span style="font-size:12px;color:var(--sub)">共 ${rows.length} 人次</span></div>
+    ${rows.length?`<div style="overflow-x:auto"><table><tr><th>姓名</th><th>角色</th><th>部门 / 职务</th><th>联系方式</th><th>影响力</th><th>立场</th><th>关注点</th><th>我方策略</th><th>所属项目</th></tr>`+
+      rows.map(s=>`<tr><td><b>${esc(s.name)}</b></td><td>${esc(s.role||'—')}</td><td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
+      <td class="stk-contact">${[s.phone&&('📱 '+esc(s.phone)),s.wechat&&('💬 '+esc(s.wechat)),s.email&&('✉️ '+esc(s.email))].filter(Boolean).join('<br>')||'<span style="color:var(--sub)">—</span>'}</td>
+      <td>${influenceBadge(s.influence)}</td><td>${attitudeBadge(s.attitude)}</td>
+      <td style="max-width:200px">${esc(s.focus||'')}</td><td style="max-width:220px">${esc(s.strategy||'')}</td>
+      <td><b style="cursor:pointer;color:var(--brand)" onclick="chainPid='${s.pid}';chainTab='flow';renderChain()">${esc(s.pname)}</b></td></tr>`).join('')+'</table></div>'
+      :'<div class="empty">无匹配人员</div>'}</div>`;
+}
+
+/* —— 干系人编辑弹窗 / 保存 / 删除（数据键 store.stakeholders[pid]）—— */
 function openStakeholderModal(id,presetRole,pid){
-  pid=pid||document.getElementById('stkPid').value||document.getElementById('stkProj').value||chainPid||currentProjectId;
+  pid=pid||chainPid||currentProjectId;
   if(!pid){toast('请先选择项目');return}
   const s=id?((store.stakeholders[pid]||[]).find(x=>x.id===id)||null):null;
-  document.getElementById('stkModalTitle').textContent=s?'编辑干系人':'新增干系人';
+  document.getElementById('stkModalTitle').textContent=s?'编辑关键人 / 干系人':'新增关键人 / 干系人';
   document.getElementById('stkPid').value=pid;
   document.getElementById('stkId').value=s?s.id:'';
   document.getElementById('stkName').value=s?s.name:'';
@@ -1680,10 +1735,10 @@ function openStakeholderModal(id,presetRole,pid){
 }
 function _stkRefresh(){
   const cur=currentPage();
-  if(cur==='chain')renderChain();else if(cur==='stakeholders')renderStakeholders();else if(cur==='detail')renderDetail();
+  if(cur==='chain')renderChain();else if(cur==='detail')renderDetail();
 }
 function saveStakeholder(){
-  const pid=document.getElementById('stkPid').value||document.getElementById('stkProj').value;if(!pid)return;
+  const pid=document.getElementById('stkPid').value;if(!pid)return;
   const name=document.getElementById('stkName').value.trim();
   if(!name){toast('请填写姓名');return}
   store.stakeholders[pid]=store.stakeholders[pid]||[];
@@ -1702,76 +1757,11 @@ function saveStakeholder(){
   persist();closeMask('mStakeholder');_stkRefresh();toast('已保存');
 }
 function delStakeholder(id,pid){
-  if(!confirm('确定删除该干系人？'))return;
-  pid=pid||document.getElementById('stkPid').value||document.getElementById('stkProj').value||chainPid;
+  if(!confirm('确定删除该关键人？'))return;
+  pid=pid||document.getElementById('stkPid').value||chainPid;
   if(!pid)return;
   store.stakeholders[pid]=(store.stakeholders[pid]||[]).filter(x=>x.id!==id);
   persist();_stkRefresh();toast('已删除')
-}
-
-/* ================= 决策链（三期） ================= */
-let chainPid=null, chainRole='all', chainAtt='all';
-function chainCoverage(pid){
-  const list=store.stakeholders[pid]||[];
-  const miss=KEY_ROLES.filter(r=>!list.some(s=>s.role===r));
-  return {list,miss,covered:KEY_ROLES.length-miss.length};
-}
-function renderChain(){
-  const el=document.getElementById('chainBody');if(!el)return;
-  const cys=document.getElementById('chainYearSlot');if(cys)cys.innerHTML=yearSelectHtml('chainYearSel');
-  const ps=projectsInView().filter(p=>!LOST_STAGES.includes(p.stage));
-  if(!ps.length){el.innerHTML=`<div class="card"><div class="empty">${fyYear==='all'?'暂无在跟项目':'当前年度（'+fyYear+'）没有在跟项目，可切换右上角年度'}</div></div>`;return}
-  if(!chainPid||!ps.some(p=>p.id===chainPid))chainPid=(ps.some(p=>p.id===currentProjectId)?currentProjectId:ps[0].id);
-  /* 1) 覆盖度总览 */
-  const h1=`<div class="card"><h3>决策结构覆盖度（在跟 ${ps.length} 个项目 · 关键角色 ${KEY_ROLES.length} 个）</h3><div class="grid g4">`+
-    ps.map(p=>{const c=chainCoverage(p.id);const full=c.covered===KEY_ROLES.length;
-      return `<div class="chain-cov ${full?'full':'lack'}" onclick="chainPid='${p.id}';renderChain()">
-        <div class="lb">${esc(p.name)}</div>
-        <div class="num" style="font-size:22px">${c.covered}<small style="font-size:12px;font-weight:400">/${KEY_ROLES.length}</small></div>
-        <div style="font-size:12px;color:${full?'var(--ok)':'var(--bad)'}">${full?'关键角色已覆盖':'缺：'+c.miss.join('、')}</div></div>`}).join('')+
-    `</div><div class="hint" style="margin-top:10px">关键角色取自 C139 的「决策结构」要素：${KEY_ROLES.join(' / ')}。缺口就是下一步要拜访的人。</div></div>`;
-  /* 2) 单项目决策链 */
-  const p=ps.find(x=>x.id===chainPid), c=chainCoverage(chainPid);
-  const groups=CHAIN_ROLES.map(r=>({r,people:c.list.filter(s=>s.role===r)})).filter(x=>x.people.length||KEY_ROLES.includes(x.r));
-  const h2=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
-      <div><h3 style="margin:0">${esc(p.name)} · 决策链</h3>
-      <div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 已识别 ${c.list.length} 人 · ${oppBadge(p.oppLevel)} ${stageBadge(p.stage)}</div></div>
-      <div style="display:flex;gap:8px"><select onchange="chainPid=this.value;renderChain()" style="width:230px">
-        ${ps.map(x=>`<option value="${x.id}" ${x.id===chainPid?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
-        <button class="btn" onclick="openStakeholderModal(null,null,'${chainPid}')">＋ 新增关键人</button></div></div>
-    <div class="chain-flow">`+
-    groups.map(g=>{
-      const people=g.people.map(s=>{
-        const focus=s.focus?`<div class="pk"><span>关注点</span>${esc(s.focus)}</div>`:'';
-        const strat=s.strategy?`<div class="pk st"><span>我方策略</span>${esc(s.strategy)}</div>`:'';
-        return `<div class="chain-person"><div class="pn"><b>${esc(s.name)}</b> ${influenceBadge(s.influence)} ${attitudeBadge(s.attitude)}</div>
-          <div class="pt">${esc(s.dept||'—')}${s.title?' / '+esc(s.title):''}</div>${focus}${strat}
-          <div class="pa"><button class="btn sm ghost" onclick="openStakeholderModal('${s.id}',null,'${chainPid}')">编辑</button>
-          <button class="btn sm danger" onclick="delStakeholder('${s.id}','${chainPid}')">删除</button></div></div>`}).join('');
-      const gap=`<div class="chain-person gap"><div class="pt">尚未识别</div>
-        <div class="pa"><button class="btn sm" onclick="openStakeholderModal(null,'${g.r}','${chainPid}')">补录此人</button></div></div>`;
-      const must=KEY_ROLES.includes(g.r)?'<i class="must">必备</i>':'';
-      return `<div class="chain-role ${g.people.length?'':'gap'}"><div class="rname">${g.r}${must}</div>${people||gap}</div>`;
-    }).join('')+`</div></div>`;
-  /* 3) 跨项目台账 */
-  const all=[];ps.forEach(x=>(store.stakeholders[x.id]||[]).forEach(s=>all.push(Object.assign({},s,{pid:x.id,pname:x.name}))));
-  const rows=all.filter(s=>(chainRole==='all'||s.role===chainRole)&&(chainAtt==='all'||s.attitude===chainAtt));
-  const h3=`<div class="card"><h3>关键人台账（跨项目）</h3>
-    <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-      <select onchange="chainRole=this.value;renderChain()" style="width:150px"><option value="all">全部角色</option>${CHAIN_ROLES.map(r=>`<option ${r===chainRole?'selected':''}>${r}</option>`).join('')}</select>
-      <select onchange="chainAtt=this.value;renderChain()" style="width:140px"><option value="all">全部立场</option>
-        <option value="support" ${chainAtt==='support'?'selected':''}>支持</option>
-        <option value="neutral" ${chainAtt==='neutral'?'selected':''}>中立</option>
-        <option value="oppose" ${chainAtt==='oppose'?'selected':''}>反对</option>
-        <option value="unknown" ${chainAtt==='unknown'?'selected':''}>未知</option></select>
-      <span style="font-size:12px;color:var(--sub);align-self:center">共 ${rows.length} 人次</span></div>
-    ${rows.length?`<div style="overflow-x:auto"><table><tr><th>姓名</th><th>角色</th><th>部门 / 职务</th><th>影响力</th><th>立场</th><th>关注点</th><th>我方策略</th><th>所属项目</th></tr>`+
-      rows.map(s=>`<tr><td><b>${esc(s.name)}</b></td><td>${esc(s.role||'—')}</td><td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
-      <td>${influenceBadge(s.influence)}</td><td>${attitudeBadge(s.attitude)}</td>
-      <td style="max-width:200px">${esc(s.focus||'')}</td><td style="max-width:220px">${esc(s.strategy||'')}</td>
-      <td><b style="cursor:pointer;color:var(--brand)" onclick="chainPid='${s.pid}';renderChain()">${esc(s.pname)}</b></td></tr>`).join('')+'</table></div>'
-      :'<div class="empty">无匹配人员</div>'}</div>`;
-  el.innerHTML=h1+h2+h3;
 }
 
 /* ================= 合同管理（清单台账） ================= */
@@ -2250,8 +2240,7 @@ function renderDtStk(p){
     list.map(s=>`<tr><td><b>${esc(s.name||'—')}</b></td><td>${esc(s.role||'—')}</td><td>${esc(s.dept||'—')} / ${esc(s.title||'—')}</td>
       <td>${influenceBadge(s.influence)}</td><td>${attitudeBadge(s.attitude)}</td><td style="max-width:200px">${esc(s.focus||'')}</td><td style="max-width:220px">${esc(s.strategy||'')}</td></tr>`).join('')+'</table></div>'
     :'<div class="empty">暂无干系人</div>'}
-    <div style="margin-top:12px"><button class="btn" onclick="show('stakeholders')">前往干系人管理 →</button>
-    <button class="btn ghost" onclick="chainPid='${p.id}';show('chain')">查看决策链视图 →</button></div></div>`;
+    <div style="margin-top:12px"><button class="btn" onclick="chainPid='${p.id}';chainTab='flow';show('chain')">查看决策链 / 干系人 →</button></div></div>`;
 }
 function renderDtContract(p){
   const c=store.contracts[p.id]||{},r=ctRow(p.id,p);

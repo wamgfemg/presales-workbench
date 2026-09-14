@@ -20,7 +20,6 @@ const MODULES = [
   { key: 'c139', label: 'C139 赢单评估' },
   { key: 'tools', label: '投标工具箱' },
   { key: 'bidagent', label: '投标智能体' },
-  { key: 'stakeholders', label: '干系人管理' },
   { key: 'chain', label: '决策链' },
   { key: 'contracts', label: '合同管理' },
   { key: 'quotations', label: '报价管理' },
@@ -39,7 +38,7 @@ const LABEL = k => (MODULES.find(m => m.key === k) || {}).label || k
 // 业务集合 key → 所属模块（写权限判定用）
 const STATE_KEY_MODULE = {
   projects: 'projects', tasks: 'projects', followups: 'projects',
-  requirements: 'requirements', stakeholders: 'stakeholders', competitors: 'market', salesTraining: 'sales', toolbox: 'toolbox', capability: 'capability',
+  requirements: 'requirements', stakeholders: 'chain', competitors: 'market', salesTraining: 'sales', toolbox: 'toolbox', capability: 'capability',
   contracts: 'contracts', quotations: 'quotations', compintel: 'compintel',
   kb: 'kb', kbTree: 'kb', pdocs: 'pdocs', docs: 'docs', checklists: 'tools',
 }
