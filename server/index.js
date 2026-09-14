@@ -953,7 +953,7 @@ market.startScheduler()
 aidaily.init({ DATA_DIR, log })
 aidaily.startScheduler()
 scenario.init({ DATA_DIR, log })
-scenario.startScheduler()
+// scenario.startScheduler()  // 已取消每日自动抓取：仅在用户点击「抓取资讯」按钮时更新（见 /api/scenario/fetch）
 
 server.listen(PORT, HOST, () => {
   log(`售前工作台 BFF 已启动  http://${HOST}:${PORT}`)
