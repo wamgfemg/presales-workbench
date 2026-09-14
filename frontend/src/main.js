@@ -1020,10 +1020,6 @@ function renderTools(){
   if(cur&&store.projects.some(p=>p.id===cur))sel.value=cur;
   else if(!sel.value&&currentProjectId&&store.projects.some(p=>p.id===currentProjectId))sel.value=currentProjectId;
   renderChecklist();
-  document.getElementById('methodRef').innerHTML=`
-    <div class="kb-item"><b>C139 模型</b><div class="body">C=高质量教练确认（*C值）；1=决定者选定我方；3=三项价值共识；9=九大关键要素。核心逻辑：先建立教练，用教练校准信息，向 1Win 推进。5C 为制胜拐点、6C（无1Win）为死亡拐点。</div></div>
-    <div class="kb-item"><b>售前四步节奏</b><div class="body">①摸清背景（背景收集表+C139初评）→ ②首次交流建立信任（首次PPT）→ ③方案价值耦合（技术PPT+高层汇报）→ ④招投标控标与高质量交付文件（Word+述标PPT）。</div></div>
-    <div class="kb-item"><b>输标/流标复盘模板</b><div class="body">结果与分差 → C139 回看哪一环失真 → 信息/关系/方案/报价四维归因 → 知识库沉淀（竞品情报/客户档案更新）→ 改进项落到下个项目任务。</div></div>`;
 }
 function renderChecklist(){
   const pid=document.getElementById('chkProj').value;

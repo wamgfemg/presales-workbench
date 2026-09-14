@@ -14,12 +14,22 @@
     if (!store.capability.items) { store.capability.items = CAP_SEED.slice(); store.capability.files = {}; persist() }
     store.capability.items = store.capability.items || []
     store.capability.files = store.capability.files || {}
+    var have = {}; store.capability.items.forEach(function (x) { if (x.id) have[x.id] = 1 })
+    var added = 0
+    CAP_MIGRATE.forEach(function (seed) { if (!have[seed.id]) { store.capability.items.push(JSON.parse(JSON.stringify(seed))); added++ } })
+    if (added) persist()
   }
   // 内置几条必备常识种子，避免空页；用户可增删
   var CAP_SEED = [
     { id: 'ck1', category: '售前方法论', title: '售前五步法：听、问、查、写、讲', content: '**听**：先听完客户业务与痛点，不急于推产品；**问**：用 SPIN（背景/难点/暗示/需求-收益）把隐性需求问成显性；**查**：现场核实系统规模、数据量、既有架构与集成点；**写**：方案先讲价值与场景，再讲功能与技术；**讲**：面向决策者讲收益、面向技术讲可行性，控制节奏留问答。', tags: '方法论,需求挖掘', updatedAt: Date.now() },
     { id: 'ck2', category: '技术方案编写', title: '方案骨架：背景-现状-需求-总体设计-分项-实施-案例-报价', content: '标准售前方案八段：①项目背景与建设目标；②客户现状与痛点；③需求理解与响应（逐条对标招标文件）；④总体架构设计（业务/应用/数据/技术四视图）；⑤分项功能与关键技术；⑥实施计划与团队；⑦同类案例与佐证；⑧投资概算与商务。要点：需求响应用“点对点应答表”，架构有图，案例可验证。', tags: '方案,投标', updatedAt: Date.now() },
     { id: 'ck3', category: '招投标实务', title: '点对点应答与废标红线', content: '技术标必须**逐条**响应招标参数，正偏离标“满足/优于”，不可空白或“详见”；商务标核对资质、业绩、授权、保证金、签字盖章、份数与密封。常见废标点：漏章漏签、报价超最高限价、工期/质保不满足、业绩证明材料缺失、有效期不足。', tags: '投标,废标', updatedAt: Date.now() }
+  ];
+  // 由「投标工具箱 · 方法论速查」迁移并入的必备常识（按 id 幂等补录，不复活用户已删的其他条目）
+  var CAP_MIGRATE = [
+    { id: 'ck4', category: '售前方法论', title: 'C139 模型速查', content: 'C=高质量教练确认（*C值）；1=决定者选定我方；3=三项价值共识；9=九大关键要素。核心逻辑：先建立教练，用教练校准信息，向 1Win 推进。**5C 为制胜拐点**，**6C（无 1Win）为死亡拐点**。', tags: 'C139,赢单,教练', updatedAt: Date.now() },
+    { id: 'ck5', category: '售前方法论', title: '售前四步节奏', content: '①摸清背景（背景收集表 + C139 初评）→ ②首次交流建立信任（首次 PPT）→ ③方案价值耦合（技术 PPT + 高层汇报）→ ④招投标控标与高质量交付文件（Word + 述标 PPT）。', tags: '售前流程,节奏', updatedAt: Date.now() },
+    { id: 'ck6', category: '招投标实务', title: '输标 / 流标复盘模板', content: '结果与分差 → C139 回看哪一环失真 → 信息 / 关系 / 方案 / 报价四维归因 → 知识库沉淀（竞品情报 / 客户档案更新）→ 改进项落到下个项目任务。', tags: '复盘,输标,流标', updatedAt: Date.now() }
   ];
 
   window.renderCapability = function () {

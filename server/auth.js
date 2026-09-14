@@ -18,7 +18,7 @@ const MODULES = [
   { key: 'pdocs', label: '项目知识库' },
   { key: 'docs', label: '方案制作中心' },
   { key: 'c139', label: 'C139 赢单评估' },
-  { key: 'tools', label: '投标工具箱' },
+  { key: 'tools', label: '标书检查清单' },
   { key: 'bidagent', label: '投标智能体' },
   { key: 'chain', label: '决策链' },
   { key: 'contracts', label: '合同管理' },

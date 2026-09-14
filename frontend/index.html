@@ -18,7 +18,7 @@
       <button data-p="kb"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="7.5" ry="2.8"/><path d="M4.5 6v6c0 1.6 3.4 2.9 7.5 2.9s7.5-1.3 7.5-2.9V6"/><path d="M4.5 12v6c0 1.6 3.4 2.9 7.5 2.9s7.5-1.3 7.5-2.9v-6"/></svg></span>向量知识库</button>
       <button data-p="pdocs"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1.2"/><path d="M5 8v11a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V8"/><path d="M10 12h4"/></svg></span>项目知识库</button>
       <button data-p="c139"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></svg></span>C139 赢单评估</button>
-      <button data-p="tools"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.6 5.4a3.6 3.6 0 0 0-4.7 4.5L4 16.8 6.2 19l6.9-6.9a3.6 3.6 0 0 0 4.5-4.7l-2.1 2.1-1.9-1.9z"/></svg></span>投标工具箱</button>
+      <button data-p="tools"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.6 5.4a3.6 3.6 0 0 0-4.7 4.5L4 16.8 6.2 19l6.9-6.9a3.6 3.6 0 0 0 4.5-4.7l-2.1 2.1-1.9-1.9z"/></svg></span>标书检查清单</button>
       <button data-p="bidagent"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="8" width="11" height="8.5" rx="2.2"/><path d="M12 8V5.2M9.5 5.2h5M4 12h2.5M17.5 12H20"/><circle cx="10" cy="12.4" r=".7"/><circle cx="14" cy="12.4" r=".7"/></svg></span>投标智能体</button>
       <button data-p="chain"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.3"/><circle cx="18" cy="6" r="2.3"/><circle cx="18" cy="18" r="2.3"/><path d="M8.1 10.9l7.8-3.8M8.1 13.1l7.8 3.8"/></svg></span>决策链</button>
       <button data-p="contracts"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 2.5h7l4.5 4.5v13a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 4.5 20V4a1.5 1.5 0 0 1 2-1.5z"/><path d="M13.5 2.5V7h4.5M8 12.5h8M8 16h8M8 9h2"/></svg></span>合同管理</button>
@@ -248,14 +248,11 @@
 
     <!-- ============ 工具箱 ============ -->
     <section class="page" id="p-tools">
-      <div class="page-head"><div><h2>投标工具箱</h2><div class="desc">投标前中后检查清单 · 常用方法论速查</div></div></div>
-      <div class="grid g2">
-        <div class="card"><h3>投标检查清单（勾选状态自动保存）</h3>
-          <div style="margin-bottom:8px"><select id="chkProj" onchange="renderChecklist()" style="width:240px"></select></div>
-          <div id="checklist"></div>
-          <button class="btn sm ghost" style="margin-top:10px" onclick="resetChecklist()">重置清单</button>
-        </div>
-        <div class="card"><h3>方法论速查</h3><div id="methodRef"></div></div>
+      <div class="page-head"><div><h2>标书检查清单</h2><div class="desc">投标前中后检查清单（按项目勾选，状态自动保存）；常用方法论速查已并入「能力提升 · 必备常识」</div></div></div>
+      <div class="card"><h3>投标检查清单（勾选状态自动保存）</h3>
+        <div style="margin-bottom:8px"><select id="chkProj" onchange="renderChecklist()" style="width:240px"></select></div>
+        <div id="checklist"></div>
+        <button class="btn sm ghost" style="margin-top:10px" onclick="resetChecklist()">重置清单</button>
       </div>
     </section>
 
