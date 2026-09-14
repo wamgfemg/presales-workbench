@@ -5,7 +5,7 @@
   var TB_TREE = [
     { key: 'cust', label: '客户展示', children: [{ key: 'cust_color', label: '彩页' }, { key: 'cust_manual', label: '产品手册' }, { key: 'cust_white', label: '白皮书' }, { key: 'cust_one', label: '一指禅/一页纸' }, { key: 'cust_case', label: '典型案例' }, { key: 'cust_line', label: '业务线介绍' }] },
     { key: 'train', label: '销售培训', children: [{ key: 'train_biz', label: '销售业务培训资料' }, { key: 'train_one', label: '一指禅/一页纸' }, { key: 'train_case', label: '典型案例' }] },
-    { key: 'tools', label: '其他工具', children: [{ key: 'tools_crm', label: 'CRM销售手册' }, { key: 'tools_meet', label: '会议邀请图模板' }, { key: 'tools_visit', label: '拜访函模板' }] }
+    { key: 'tools', label: '其他', children: [{ key: 'tools_quote', label: '报价模版' }, { key: 'tools_visit', label: '拜访函模版' }, { key: 'tools_partner', label: '伙伴联合方案' }, { key: 'tools_faq', label: 'FAQ' }] }
   ]
   var TB = { sol: null, node: 'cust_color' }
   function nodeLabel(key) { for (var i = 0; i < TB_TREE.length; i++) { var g = TB_TREE[i]; for (var j = 0; j < g.children.length; j++) if (g.children[j].key === key) return g.label + ' / ' + g.children[j].label } return key }
