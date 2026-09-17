@@ -57,6 +57,7 @@ function load(){try{const s=localStorage.getItem(LS_KEY);if(s)store=JSON.parse(s
   if(!store.compintel)store.compintel=[];
   if(!store.requirements)store.requirements={};
   if(!store.followups)store.followups={};
+  if(!store.timesheets)store.timesheets=[];
   if(!store.ui)store.ui={};
   if(!store.kbTree||!store.kbTree.length){
     store.kbTree=DEF_CATS.map(n=>({id:uid(),name:n,pid:null}));
@@ -131,6 +132,10 @@ function show(p){
   if(p==='sales'&&window.renderSales)renderSales();
   if(p==='toolbox'&&window.renderToolbox)renderToolbox();
   if(p==='capability'&&window.renderCapability)renderCapability();
+  if(p==='mytodo'&&window.renderMytodo)renderMytodo();
+  if(p==='capacity'&&window.renderCapacity)renderCapacity();
+  if(p==='funnel'&&window.renderFunnel)renderFunnel();
+  if(p==='customer360'&&window.renderCust360)renderCust360();
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-p]');if(b)show(b.dataset.p)});
 function closeMask(id){document.getElementById(id).classList.remove('on')}
@@ -166,9 +171,12 @@ function saveProject(){
     lostReason:LOST_STAGES.includes(pfStage.value)?pfLost.value.trim():''};
   if(editingProjectId){
     const p=store.projects.find(x=>x.id===editingProjectId);
+    if(p.stage!==base.stage&&!p.stageSince){p.stageSince=today()}
+    if(p.stage!==base.stage&&p.stageSince)p._hist=(p._hist||[]).concat([{stage:p.stage,due:p.stageSince}]);
+    if(p.stage!==base.stage)p.stageSince=today();
     Object.assign(p,base);addTl(p,'更新项目基本信息');
   }else{
-    const p=Object.assign({id:uid(),progressText:'',created:today(),c139:defaultC139(),tasks:[],timeline:[],bg:{},docs:[]},base);
+    const p=Object.assign({id:uid(),progressText:'',created:today(),stageSince:today(),c139:defaultC139(),tasks:[],timeline:[],bg:{},docs:[]},base);
     store.projects.unshift(p);addTl(p,'创建项目');
     currentProjectId=p.id;
   }
@@ -2406,7 +2414,7 @@ function seed(){
  * 覆盖库之前会把本机全量快照存进 localStorage['presales_workbench_v1_legacy']（每会话一次），防误覆盖。
  * rev 冲突（拉到数据与写回之间同事又改了）→ 提示后强制覆盖，服务器 rev +1。
  */
-var SYNC_COLLECTIONS=['projects','kb','docs','tasks','kbTree','pdocs','checklists','stakeholders','contracts','quotations','compintel','requirements','followups','ui','bidAgentConvs','competitors','salesTraining','toolbox','capability'];
+var SYNC_COLLECTIONS=['projects','kb','docs','tasks','kbTree','pdocs','checklists','stakeholders','contracts','quotations','compintel','requirements','followups','ui','bidAgentConvs','competitors','salesTraining','toolbox','capability','timesheets'];
 var SYNC_LABEL={projects:'项目',kb:'知识库',docs:'方案文档',tasks:'任务',kbTree:'知识库目录',pdocs:'项目资料',checklists:'检查清单',stakeholders:'干系人',contracts:'合同',quotations:'报价',compintel:'竞争情报',requirements:'需求',followups:'跟进记录',ui:'界面配置'};
 var SYNC_POLL_MS=60000;
 var _rev={}, _sent={}, _online=false, _lastErr='', _pushTimer=null, _pushing=false, _pushAgain=false, _legacyGuard=false;

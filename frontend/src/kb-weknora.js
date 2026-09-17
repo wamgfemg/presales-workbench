@@ -42,7 +42,7 @@ function docsInCat(nodeId) {
   return src.filter(it => { const c = catOfDoc(it); return c && ids.indexOf(c) >= 0 })
 }
 
-function fmtDate(d) {
+function wekFmtDateTime(d) {
   if (!d) return '—'
   const dt = new Date(d)
   if (isNaN(dt)) return String(d).slice(0, 16)
@@ -160,7 +160,7 @@ function renderKb() {
         <button class="btn sm ghost" onclick="previewWekDoc('${it.id}')">预览</button>
         <a class="btn sm ghost" href="/api/weknora/download/${encodeURIComponent(it.id)}?kb=${encodeURIComponent(owner)}&name=${encodeURIComponent(it.file_name || it.title || 'file')}" target="_blank">下载</a>
       </div>
-      <div class="meta">更新于 ${fmtDate(it.updated_at || it.created_at)} · ${esc(it.file_name || '')}</div>
+      <div class="meta">更新于 ${wekFmtDateTime(it.updated_at || it.created_at)} · ${esc(it.file_name || '')}</div>
       <div class="body">${esc((it.description || '').slice(0, 600))}${(it.description || '').length > 600 ? '…' : ''}</div>
     </div>`
   }).join('')

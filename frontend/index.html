@@ -34,6 +34,10 @@
       <button data-p="sales"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l9-4 9 4-9 4z"/><path d="M7 10.5V15c0 1.2 2.2 2.2 5 2.2s5-1 5-2.2v-4.5"/><path d="M21 8.5v5"/></svg></span>销售培训</button>
       <button data-p="toolbox"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/></svg></span>售前工具箱</button>
       <button data-p="capability"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg></span>能力提升</button>
+      <button data-p="mytodo"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7.5" r="3.2"/><path d="M5 20a4 4 0 0 1 8 0"/><circle cx="17" cy="9" r="2.2"/><path d="M15 20a4 4 0 0 1 7-2"/></svg></span>我的待办</button>
+      <button data-p="capacity"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3l2-7 3 14 3-9 2 4h5"/></svg></span>产能看板</button>
+      <button data-p="funnel"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18l-7 8v6l-4 2v-8z"/></svg></span>商机漏斗</button>
+      <button data-p="customer360"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2"/><path d="M5 21a7 7 0 0 1 14 0M12 11a3 3 0 0 0 3 3h1.5a2.5 2.5 0 0 1 2 4"/></svg></span>客户360</button>
       <button data-p="users" style="display:none"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 2.6V11c0 4.4-2.9 7.4-7 8.9-4.1-1.5-7-4.5-7-8.9V5.6z"/><path d="M9.5 11.5l1.8 1.8 3.5-3.6"/></svg></span>用户管理</button>
     </nav>
     <div class="side-foot">
@@ -359,6 +363,31 @@
       <div class="page-head"><div><h2>需求管理</h2><div class="desc">收集、分析与跟踪项目需求，并汇入项目知识库</div></div>
         <select id="rqProj" onchange="renderRequirements()" style="width:260px"></select></div>
       <div id="rqBody"></div>
+    </section>
+
+    <!-- ============ 我的待办 ============ -->
+    <section class="page" id="p-mytodo">
+      <div class="page-head"><div><h2>我的待办</h2><div class="desc">按责任人聚合「下一步」 · 逾期自动标记 · 逾期≥3天醒目升级</div></div>
+        <div style="display:flex;gap:8px"><button id="scopeMine" class="btn" onclick="mytodoScope('mine')">我的</button><button id="scopeTeam" class="btn ghost" onclick="mytodoScope('team')">团队全部</button></div></div>
+      <div id="mytodoBody"></div>
+    </section>
+
+    <!-- ============ 产能看板 ============ -->
+    <section class="page" id="p-capacity">
+      <div class="page-head"><div><h2>售前产能看板</h2><div class="desc">按项目角色估算负荷 + 工时打点 → 识别超载 / 低负荷，辅助派单</div></div></div>
+      <div id="capBody"></div>
+    </section>
+
+    <!-- ============ 商机漏斗 ============ -->
+    <section class="page" id="p-funnel">
+      <div class="page-head"><div><h2>商机漏斗</h2><div class="desc">各阶段数量 / 金额 / 加权预测合同额 / 阶段停留 · 找出卡壳阶段</div></div></div>
+      <div id="funnelBody"></div>
+    </section>
+
+    <!-- ============ 客户360 ============ -->
+    <section class="page" id="p-customer360">
+      <div class="page-head"><div><h2>客户 360°</h2><div class="desc">按客户聚合：在管项目 / 金额 / 跟进 / 决策链 · 一个客户一次看全</div></div></div>
+      <div id="csBody"></div>
     </section>
   </main>
 </div>
@@ -740,5 +769,9 @@
 <script src="./src/sales.js"></script>
 <script src="./src/toolbox.js"></script>
 <script src="./src/capability.js"></script>
+<script src="./src/mytodo.js"></script>
+<script src="./src/capacity.js"></script>
+<script src="./src/funnel.js"></script>
+<script src="./src/customer360.js"></script>
 </body>
 </html>

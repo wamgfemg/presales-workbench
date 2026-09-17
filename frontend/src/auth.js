@@ -5,6 +5,7 @@
   window.canView = function (m) { if (!ME) return false; if (ME.role === 'admin') return true; return !!(ME.perms && ME.perms[m]) }
   window.canEdit = function (m) { if (!ME) return false; if (ME.role === 'admin') return true; return ME.perms && ME.perms[m] === 'edit' }
   window.currentRole = function () { return ME ? ME.role : '' }
+  window.currentUser = function () { return ME ? ME.username : '' }
 
   function api(url, opts) { return fetch(url, Object.assign({ headers: { 'content-type': 'application/json' } }, opts || {})).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j } }).catch(function () { return { status: r.status, body: {} } }) }) }
 
@@ -27,6 +28,7 @@
     document.querySelectorAll('#nav button[data-p]').forEach(function (b) {
       var p = b.getAttribute('data-p')
       if (p === 'users') { b.style.display = (ME.role === 'admin') ? '' : 'none'; return }
+      if (p === 'mytodo') { b.style.display = (ME.role === 'admin' || canView('projects')) ? '' : 'none'; return }
       if (ME.role === 'admin') return
       if (!canView(p)) b.style.display = 'none'
     })

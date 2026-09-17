@@ -19,3 +19,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# 备份/临时文件（勿入库）
+*.bak
+*.bak-*
+*.orig

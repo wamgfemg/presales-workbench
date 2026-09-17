@@ -22,6 +22,7 @@ const auth = require('./auth.js')
 const market = require('./market.js')
 const aidaily = require('./aidaily.js')
 const scenario = require('./scenario.js')
+const reminder = require('./reminder.js')
 
 const PORT = Number(process.env.PORT || 8088)
 const HOST = process.env.BIND_HOST || '0.0.0.0'
@@ -34,7 +35,11 @@ const WEKNORA_TIMEOUT_MS = Number(process.env.WEKNORA_TIMEOUT_MS || 30000)
 const HERMES_TIMEOUT_MS = Number(process.env.HERMES_TIMEOUT_MS || 20000)
 const DATA_DIR = process.env.DATA_DIR || '/opt/presales-workbench/data'
 const FILE_DIR = path.join(DATA_DIR, 'files')
+
 const FILES_INDEX = path.join(DATA_DIR, 'files-index.json')
+const OAI_KEY = process.env.OPENAI_COMPAT_KEY || 'sk-openwebui-hermes-49d2f1a8'
+const OAI_MODEL = process.env.OPENAI_COMPAT_MODEL || 'hermes-wordpresales'
+
 
 let _healthCache = { at: 0, data: null }
 let _filesIndex = (() => {
@@ -143,7 +148,106 @@ async function hermesSessions() {
   return sessions
 }
 
+
+/* ---------------- OpenAI 兼容端点（供 Open WebUI 连接 Hermes） ---------------- */
+function oaiOk(req) {
+  const h = String(req.headers.authorization || '')
+  return h === `Bearer ${OAI_KEY}` || h === OAI_KEY
+}
+
+function oaiTextFromMessages(messages) {
+  if (!Array.isArray(messages)) return ''
+  const roleLabel = { system: '系统', user: '用户', assistant: '智能体' }
+  const parts = []
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    let content = ''
+    if (Array.isArray(m.content)) {
+      content = m.content
+        .map((c) => (c && c.type === 'text' ? c.text : c && c.type === 'image_url' ? '[图片]' : ''))
+        .filter(Boolean).join('\n')
+    } else {
+      content = String(m.content || '')
+    }
+    if (!content.trim()) continue
+    parts.push(`## ${roleLabel[m.role] || m.role || '消息'} ${i + 1}\n${content.trim()}`)
+  }
+  return parts.join('\n\n')
+}
+
+async function handleOaiModels(req, res) {
+  if (!oaiOk(req)) return sendJson(res, 401, { error: '无效的 API Key' })
+  return sendJson(res, 200, {
+    object: 'list',
+    data: [{ id: OAI_MODEL, object: 'model', created: 0, owned_by: 'hermes' }],
+  })
+}
+
+async function handleOaiChat(req, res) {
+  if (!oaiOk(req)) return sendJson(res, 401, { error: '无效的 API Key' })
+  let body
+  try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { error: e.message }) }
+  const model = String(body.model || OAI_MODEL)
+  const stream = body.stream !== false
+  const text = oaiTextFromMessages(body.messages)
+  if (!text) return sendJson(res, 400, { error: 'messages 不能为空' })
+
+  const key = 'oai-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+  const task = createTask(pool, key, text, { sessionId: null, reset: false })
+  const cc = 'chatcmpl-' + task.id
+
+  // 非流式：轮询直至完成，返回 OpenAI JSON
+  if (!stream) {
+    while (task.status === 'processing') {
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+    return sendJson(res, 200, {
+      id: cc, object: 'chat.completion', model,
+      choices: [{ index: 0, message: { role: 'assistant', content: task.result || (task.error || '') }, finish_reason: 'stop' }],
+    })
+  }
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  })
+  let closed = false
+  let timer = null
+  const beat = setInterval(() => { if (!closed) { try { res.write(': ping\n\n') } catch (_) {} } }, 30000)
+  const cleanup = () => { clearInterval(beat); if (timer) clearInterval(timer) }
+  req.on('close', () => { closed = true; cleanup() })
+
+  const oaiChunk = (delta, finish) => {
+    if (closed) return
+    const payload = { id: cc, object: 'chat.completion.chunk', model, created: Math.floor(Date.now() / 1000), choices: [{ index: 0, delta, finish_reason: finish }] }
+    try { res.write(`data: ${JSON.stringify(payload)}\n\n`) } catch (_) { closed = true }
+  }
+
+  let lastIdx = 0
+  timer = setInterval(() => {
+    if (closed) return
+    while (lastIdx < task.events.length) {
+      const ev = task.events[lastIdx++]
+      if (ev.type === 'delta' && ev.text) oaiChunk({ content: ev.text }, null)
+    }
+    if (task.status === 'done') {
+      oaiChunk({}, 'stop')
+      if (!closed) { try { res.write('data: [DONE]\n\n') } catch (_) {} }
+      cleanup()
+      if (!closed) { try { res.end() } catch (_) {} }
+    } else if (task.status === 'error') {
+      const msg = String(task.error || '').replace(/"/g, '\\"')
+      if (!closed) { try { res.write(`data: {"error":"${msg}"}\n\ndata: [DONE]\n\n`) } catch (_) {} }
+      cleanup()
+      if (!closed) { try { res.end() } catch (_) {} }
+    }
+  }, 300)
+}
+
 /* ---------------- SSE 对话（异步后台任务 + SSE 实时流 + 断线轮询兜底） ---------------- */
+
 async function handleChat(req, res) {
   let body
   try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { error: e.message }) }
@@ -838,6 +942,7 @@ const server = http.createServer(async (req, res) => {
     if (url.startsWith('/api/market')) return void (await market.handle(req, res, url.split('?')[0]))
     if (url.startsWith('/api/aidaily')) return void (await aidaily.handle(req, res, url.split('?')[0]))
     if (url.startsWith('/api/scenario')) return void (await scenario.handle(req, res, url.split('?')[0]))
+    if (url.startsWith('/api/reminder')) return void (await reminder.handle(req, res, url.split('?')[0]))
     if (url === '/api/chat' && req.method === 'POST') return void (await handleChat(req, res))
     if (url === '/api/qa/ask' && req.method === 'POST') return void (await handleQaAsk(req, res))
     if (url.startsWith('/api/chat/poll/') && req.method === 'GET') {
@@ -848,6 +953,9 @@ const server = http.createServer(async (req, res) => {
     if (url.startsWith('/api/session/attach') && req.method === 'POST') return void (await handleAttach(req, res))
     if (url.startsWith('/api/health')) return void (await handleHealth(req, res))
     if (url === '/api/ai/judge' && req.method === 'POST') return void (await handleAiJudge(req, res))
+    if (url === '/v1/models' && req.method === 'GET') return void (await handleOaiModels(req, res))
+    if (url === '/v1/chat/completions' && req.method === 'POST') return void (await handleOaiChat(req, res))
+
 
     /* 通用文件上传/下载 */
     if (url === '/api/files/upload' && req.method === 'POST') return void (await handleFileUpload(req, res))
@@ -953,7 +1061,9 @@ market.startScheduler()
 aidaily.init({ DATA_DIR, log })
 aidaily.startScheduler()
 scenario.init({ DATA_DIR, log })
-// scenario.startScheduler()  // 已取消每日自动抓取：仅在用户点击「抓取资讯」按钮时更新（见 /api/scenario/fetch）
+  // scenario.startScheduler()  // 已取消每日自动抓取：仅在用户点击「抓取资讯」按钮时更新（见 /api/scenario/fetch）
+  reminder.init({ DATA_DIR, log })
+  reminder.startScheduler()
 
 server.listen(PORT, HOST, () => {
   log(`售前工作台 BFF 已启动  http://${HOST}:${PORT}`)
