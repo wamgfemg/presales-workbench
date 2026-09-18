@@ -111,6 +111,7 @@ function show(p){
   document.querySelectorAll('.page').forEach(x=>x.classList.remove('on'));
   document.getElementById('p-'+p).classList.add('on');
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+  const _ab=document.querySelector('#nav button.on'); if(_ab){const _g=_ab.closest('.nav-group'); if(_g)_g.classList.remove('collapsed');}
   if(p==='dash')renderDash();
   if(p==='projects')renderProjects();
   if(p==='kb')renderKb();
@@ -136,8 +137,11 @@ function show(p){
   if(p==='capacity'&&window.renderCapacity)renderCapacity();
   if(p==='funnel'&&window.renderFunnel)renderFunnel();
   if(p==='customer360'&&window.renderCust360)renderCust360();
+  if(p==='metrics')renderMetrics();
+  if(p==='minutes')renderMinutes();
 }
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-p]');if(b)show(b.dataset.p)});
+document.getElementById('nav').addEventListener('click',e=>{const t=e.target.closest('.nav-group-title');if(t){const g=t.closest('.nav-group');if(g)g.classList.toggle('collapsed');}});
 function closeMask(id){document.getElementById(id).classList.remove('on')}
 function openMask(id){document.getElementById(id).classList.add('on')}
 
@@ -2568,4 +2572,92 @@ function bootApp(){
     setInterval(function(){if(!document.hidden)pullState(false)},SYNC_POLL_MS);
     document.addEventListener('visibilitychange',function(){if(!document.hidden)pullState(false)});
   });
+}
+
+function renderMetrics(){
+  const M=[
+    {n:'投标数',d:'统计周期内正式提交投标文件的项目数',f:'count(项目 | 阶段进入「招投标阶段」且已提交标书)',p:'自然月 / 季度',e:'仅报名未交标不计入；联合体牵头与参与分别计',s:'项目管理·阶段'},
+    {n:'中标率',d:'已中标项目占已收口项目的比例',f:'已中标 ÷（已中标+流标+输标+项目已取消）×100%',p:'滚动 12 个月',e:'前期交流 / 方案阶段在跟项目不计入收口',s:'项目管理·阶段'},
+    {n:'在跟商机金额',d:'在跟项目预估合同额之和',f:'Σ 项目.预估合同额（阶段∈前期交流/方案阶段/招投标阶段）',p:'月末时点快照',e:'已中标 / 已输标 / 已取消不计入',s:'项目管理·金额'},
+    {n:'加权预测合同额',d:'在跟商机按赢单率折算后的预期产值',f:'Σ（预估合同额 × C139赢单率 ÷ 100）',p:'月末时点快照',e:'同「在跟商机金额」范围',s:'C139 + 金额'},
+    {n:'平均赢单率',d:'在跟项目 C139 评分的均值',f:'mean(项目.C139赢单率)',p:'月末时点快照',e:'仅统计在跟项目',s:'C139 评估'},
+    {n:'已中标合同额',d:'已中标项目合同金额之和',f:'Σ 项目.中标合同额（阶段=已中标）',p:'自然年',e:'未签约框架协议不计入',s:'项目管理·金额'},
+    {n:'已中标毛利',d:'已中标项目测算毛利之和',f:'Σ 项目.毛利（已中标）',p:'自然年',e:'以报价/合同毛利测算口径为准',s:'报价 / 合同'},
+    {n:'方案产出时长',d:'从立项到方案定稿的平均天数',f:'mean(方案定稿日 − 立项日)',p:'滚动 6 个月',e:'未定稿项目不计入',s:'项目时间线 + 方案中心'},
+    {n:'Agent 调用量',d:'周期内智能体/问答调用次数',f:'count(调用日志 | 来源∈投标智能体/智能问答/Hermes)',p:'自然日',e:'测试/健康检查调用排除',s:'BFF 调用日志(待埋点)'},
+    {n:'知识库命中率',d:'检索命中占检索总数的比例',f:'命中数 ÷ 检索总数 ×100%',p:'自然周',e:'测试检索与空结果排除',s:'WeKnora 检索日志(待埋点)'},
+    {n:'逾期待办数',d:'下一步中已到期且未关闭的项数',f:'count(待办 | 到期日<今天 且 未关闭)',p:'每日快照',e:'已延期但本周内不算逾期',s:'项目待办'},
+    {n:'高风险未关闭',d:'风险/问题级别=高且未关闭的项数',f:'count(风险 | 级别=高 且 未关闭)',p:'每日快照',e:'已闭环风险不计入',s:'项目风险'},
+    {n:'商机转化周期',d:'从首次接触到中标的平均天数',f:'mean(中标日 − 首次接触日)',p:'滚动 12 个月',e:'未中标项目不计入',s:'项目时间线'},
+    {n:'报价偏差率',d:'最终合同额相对最近报价偏离',f:'|最终合同额 − 最近报价| ÷ 最近报价 ×100%',p:'按项目',e:'框架协议未转定量不计入',s:'报价 + 合同'}
+  ];
+  const body=document.getElementById('metricsBody'); if(!body)return;
+  const intro='<div class="card"><div class="mt-summary" style="margin:0">本页为「对外引用数字的统一定义」。所有汇报、看板、AI 问答引用的核心指标，均以此处公式为准，避免同一数字在不同场合口径打架。指标随业务沉淀持续补充。</div></div>';
+  const cards=M.map((m,i)=>'<div class="metric-card"><h4><span class="mc-no">'+(i+1)+'</span>'+esc(m.n)+'</h4>'
+    +'<div class="row"><b>定义</b>'+esc(m.d)+'</div>'
+    +'<div class="formula">公式：'+esc(m.f)+'</div>'
+    +'<div class="row"><b>周期</b>'+esc(m.p)+'</div>'
+    +'<div class="row"><b>排除项</b>'+esc(m.e)+'</div>'
+    +'<div class="row"><b>来源</b>'+esc(m.s)+'</div></div>').join('');
+  body.innerHTML=intro+'<div class="metrics-grid">'+cards+'</div>';
+}
+
+function renderMinutes(){
+  const inp=document.getElementById('mtInput'), gen=document.getElementById('mtGen'),
+        clr=document.getElementById('mtClear'), st=document.getElementById('mtStatus'),
+        res=document.getElementById('mtResult'), expWrap=document.getElementById('mtExportWrap'),
+        exp=document.getElementById('mtExport');
+  if(!inp||renderMinutes._wired)return; renderMinutes._wired=true;
+  let lastMinutes=null;
+  clr.onclick=()=>{inp.value='';res.innerHTML='<div class="empty">尚未生成。左侧粘贴内容后点击「生成纪要」。</div>';expWrap.style.display='none';st.textContent='';lastMinutes=null;};
+  gen.onclick=async()=>{
+    const text=inp.value.trim();
+    if(!text){st.textContent='请先粘贴会议内容';return;}
+    gen.disabled=true; st.textContent='AI 抽取决议/待办中…（约 1-2 分钟）'; res.innerHTML='<div class="empty">生成中…</div>';
+    try{
+      const r=await fetch('/api/minutes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});
+      const j=await r.json();
+      if(!r.ok||!j.ok){res.innerHTML='<div class="empty">生成失败：'+(j.error||('HTTP '+r.status))+'</div>';st.textContent='失败';return;}
+      lastMinutes=j.minutes; renderMinutesResult(res, j.minutes); expWrap.style.display='block'; st.textContent='已完成（模型 '+(j.model||'')+'）';
+    }catch(e){res.innerHTML='<div class="empty">请求异常：'+esc(String(e.message||e))+'</div>';st.textContent='异常';}
+    finally{gen.disabled=false;}
+  };
+  exp.onclick=()=>{ if(lastMinutes) exportMinutesWord(lastMinutes); };
+}
+
+function renderMinutesResult(res, m){
+  m=m||{};
+  const ai=(m.attendees||[]).map(a=>'<span class="mt-chip">'+esc(a)+'</span>').join('')||'<span class="mt-chip">—</span>';
+  const dec=(m.decisions||[]).map(d=>'<div class="mt-ai"><span class="who">决议</span><span>'+esc(d)+'</span></div>').join('')||'<div class="empty">无</div>';
+  const acts=((m.actionItems||[]).map(it=>'<tr><td>'+esc(it.what||'')+'</td><td>'+esc(it.owner||'')+'</td><td>'+esc(it.due||'')+'</td></tr>').join(''))||'<tr><td colspan="3">无</td></tr>';
+  const risk=(m.risks||[]).map(r=>'<div class="mt-ai"><span class="who">风险</span><span>'+esc(r)+'</span></div>').join('')||'<div class="empty">无</div>';
+  res.innerHTML=
+    (m.title?'<div class="card"><div class="page-head" style="margin-bottom:8px"><div><h2 style="font-size:18px">'+esc(m.title)+'</h2><div class="desc">'+esc(m.date||'')+'</div></div></div></div>':'')
+    +(m.summary?'<div class="mt-section"><h4><span class="n">★</span>会议综述</h4><div class="mt-summary">'+esc(m.summary)+'</div></div>':'')
+    +'<div class="mt-section"><h4><span class="n">👥</span>参会人</h4><div>'+ai+'</div></div>'
+    +'<div class="mt-section"><h4><span class="n">✓</span>决议事项</h4>'+dec+'</div>'
+    +'<div class="mt-section"><h4><span class="n">▶</span>行动待办</h4><table class="mt-table"><thead><tr><th>事项</th><th>责任人</th><th>时限</th></tr></thead><tbody>'+acts+'</tbody></table></div>'
+    +'<div class="mt-section"><h4><span class="n">!</span>风险与遗留</h4>'+risk+'</div>'
+    +(m.nextMeeting?'<div class="mt-section"><h4><span class="n">⏱</span>下次安排</h4><div class="mt-summary">'+esc(m.nextMeeting)+'</div></div>':'');
+}
+
+function exportMinutesWord(m){
+  m=m||{};
+  const ai=(m.attendees||[]).join('、')||'—';
+  const dec=((m.decisions||[]).map((d,i)=>(i+1)+'. '+d).join('\n'))||'无';
+  const acts=((m.actionItems||[]).map(it=>'事项：'+(it.what||'')+'；责任人：'+(it.owner||'')+'；时限：'+(it.due||'')).join('\n'))||'无';
+  const risk=((m.risks||[]).map((r,i)=>(i+1)+'. '+r).join('\n'))||'无';
+  const nl=s=>String(s).replace(/\n/g,'<br>');
+  const html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>会议纪要</title></head><body>'
+    +'<h1 style="font-family:微软雅黑">'+esc(m.title||'会议纪要')+'</h1>'
+    +'<p><b>日期：</b>'+esc(m.date||'')+'　<b>参会人：</b>'+esc(ai)+'</p>'
+    +'<h2 style="font-family:微软雅黑">一、会议综述</h2><p>'+nl(esc(m.summary||''))+'</p>'
+    +'<h2 style="font-family:微软雅黑">二、决议事项</h2><p>'+nl(dec)+'</p>'
+    +'<h2 style="font-family:微软雅黑">三、行动待办</h2><p>'+nl(acts)+'</p>'
+    +'<h2 style="font-family:微软雅黑">四、风险与遗留问题</h2><p>'+nl(risk)+'</p>'
+    +'<p><b>下次安排：</b>'+esc(m.nextMeeting||'')+'</p>'
+    +'</body></html>';
+  const blob=new Blob(['\ufeff'+html],{type:'application/msword'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=(m.title||'会议纪要')+'.doc'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }

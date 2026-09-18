@@ -248,6 +248,33 @@ async function handleOaiChat(req, res) {
 
 /* ---------------- SSE 对话（异步后台任务 + SSE 实时流 + 断线轮询兜底） ---------------- */
 
+function extractJson(s){
+  if(!s)return null;
+  let t=String(s).trim();
+  const fence=t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if(fence)t=fence[1].trim();
+  const a=t.indexOf('{'), b=t.lastIndexOf('}');
+  if(a>=0&&b>a)t=t.slice(a,b+1);
+  try{return JSON.parse(t)}catch(_){return null}
+}
+
+async function handleMinutes(req, res){
+  let body;
+  try{ body=await readBody(req) }catch(e){ return sendJson(res,400,{error:e.message}) }
+  const text=String(body.text||'').trim();
+  if(!text) return sendJson(res,400,{error:'会议内容不能为空'});
+  if(text.length>30000) return sendJson(res,413,{error:'内容过长（上限 30000 字），请分段处理'});
+  const prompt='你是一名资深项目会议纪要秘书。请阅读以下会议内容，抽取结构化信息，并【只输出一个 JSON 对象】，不要输出任何解释、前言或代码块标记。\nJSON 字段：\n{\n  "title": string,\n  "date": string,\n  "attendees": string[],\n  "summary": string,\n  "decisions": string[],\n  "actionItems": [{"what":string,"owner":string,"due":string}],\n  "risks": string[],\n  "nextMeeting": string\n}\n规则：严格基于原文，禁止编造；原文没有的字段返回空数组或空字符串；owner/due 无法对应填空字符串；输出必须是合法 JSON（最外层为对象）。\n\n会议内容：\n"""'+text+'"""';
+  try{
+    const session=pool.get('minutes', null);
+    const result=await session.submit(prompt, ()=>{});
+    const raw=(result&&result.text)||'';
+    const parsed=extractJson(raw);
+    if(!parsed) return sendJson(res,502,{error:'模型未返回可解析的 JSON', raw:raw.slice(0,1500)});
+    return sendJson(res,200,{ok:true, minutes:parsed, model:result.model||null, usage:result.usage||null});
+  }catch(e){ return sendJson(res,502,{error:'生成失败：'+String((e&&e.message)||e)}) }
+}
+
 async function handleChat(req, res) {
   let body
   try { body = await readBody(req) } catch (e) { return sendJson(res, 400, { error: e.message }) }
@@ -945,6 +972,7 @@ const server = http.createServer(async (req, res) => {
     if (url.startsWith('/api/reminder')) return void (await reminder.handle(req, res, url.split('?')[0]))
     if (url === '/api/chat' && req.method === 'POST') return void (await handleChat(req, res))
     if (url === '/api/qa/ask' && req.method === 'POST') return void (await handleQaAsk(req, res))
+  if (url === '/api/minutes' && req.method === 'POST') return void (await handleMinutes(req, res))
     if (url.startsWith('/api/chat/poll/') && req.method === 'GET') {
       return void (await handlePoll(req, res, decodeURIComponent(url.slice('/api/chat/poll/'.length).split('?')[0])))
     }

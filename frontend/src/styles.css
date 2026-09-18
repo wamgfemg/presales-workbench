@@ -538,3 +538,32 @@ body.auth-pending #app{display:none!important}
 .cp-right{display:flex;gap:8px}
 .chain-cov.on{border-color:var(--brand);box-shadow:0 0 0 2px rgba(59,110,240,.14)}
 .chain-person .pc{font-size:11.5px;color:#414a5f;line-height:1.5;margin:3px 0}
+
+/* ============ 导航分组（信息架构重组） ============ */
+.nav-group{margin:8px 0 2px}
+.nav-group-title{font-size:11px;color:#7e88a8;font-weight:700;letter-spacing:.6px;padding:12px 12px 5px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.nav-group-title .cg{font-size:10px;opacity:.55;font-weight:600;transition:transform .15s;display:inline-block}
+.nav-group.collapsed .nav-group-btns{display:none}
+.nav-group.collapsed .nav-group-title .cg{transform:rotate(-90deg)}
+.nav-group-btns{display:flex;flex-direction:column}
+
+/* ============ 指标口径库 ============ */
+.metrics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+.metric-card{background:var(--panel);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 18px;border-left:4px solid var(--brand)}
+.metric-card h4{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.metric-card .mc-no{font-size:11px;color:#fff;background:var(--brand);border-radius:6px;padding:1px 7px;font-weight:700}
+.metric-card .row{font-size:12.5px;line-height:1.7;margin:4px 0;color:var(--ink)}
+.metric-card .row b{color:var(--sub);font-weight:600;display:inline-block;min-width:60px}
+.metric-card .formula{background:#f6f8ff;border-radius:8px;padding:8px 10px;font-size:12.5px;color:#2b3858;margin:6px 0;font-family:ui-monospace,Menlo,Consolas,monospace}
+
+/* ============ 会议纪要 ============ */
+.mt-summary{background:#f6f8ff;border-radius:10px;padding:12px 14px;line-height:1.8;font-size:13.5px;margin-bottom:14px}
+.mt-section{margin-bottom:16px}
+.mt-section h4{font-size:14px;margin:0 0 8px;display:flex;align-items:center;gap:7px}
+.mt-section h4 .n{background:var(--brand);color:#fff;border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+.mt-ai{display:flex;align-items:flex-start;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff}
+.mt-ai .who{font-weight:600;color:var(--brand);flex-shrink:0;min-width:42px}
+.mt-table{width:100%;border-collapse:collapse;font-size:13px}
+.mt-table th,.mt-table td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+.mt-table th{background:#f8fafd;color:var(--sub);font-size:12px}
+.mt-chip{display:inline-block;background:#eef1f9;color:#3a4358;border-radius:14px;padding:3px 10px;font-size:12px;margin:3px 4px 0 0}
