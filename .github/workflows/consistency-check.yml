@@ -1,0 +1,66 @@
+name: Production consistency check
+
+# 目的：线上运行目录 /opt/presales-workbench 不是 git 仓库。
+# deploy.yml 只能保证「部署那一刻线上 == 仓库」；若之后有人直接改线上（手工热修、
+# 传文件覆盖），仓库不会知道，下一次部署会静默回退这些改动——而回退往往在几天后
+# 才以「功能忽然消失」的形式暴露出来。
+#
+# 本工作流定期做一次只读比对：用与部署相同的 rsync 参数 dry-run，
+# 发现差异就以失败告警，把「漂移」在当天暴露出来，而不是等下次部署。
+#
+# 注意：本步骤只做 dry-run（-n），不会向服务器写入任何内容。
+
+on:
+  schedule:
+    # 每天北京时间 09:10（UTC 01:10）
+    - cron: '10 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  drift:
+    name: Check production vs repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Drift check (只读 dry-run)
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER_NAME: ${{ secrets.SERVER_USER }}
+        run: |
+          set -e
+          out=$(rsync -azn --delete --itemize-changes \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            frontend server deploy test \
+            "$USER_NAME@$HOST:/opt/presales-workbench/" | grep -v '^$' || true)
+          if [ -n "$out" ]; then
+            {
+              echo "## ⚠️ 检测到线上漂移"
+              echo ""
+              echo "线上 \`/opt/presales-workbench\` 存在未被仓库管理的改动（或缺失）。"
+              echo "比对清单（\`>\` 表示部署会覆盖/新增线上文件，\`*deleting\` 表示部署会删除线上文件）："
+              echo ""
+              echo '```'
+              echo "$out"
+              echo '```'
+              echo ""
+              echo "处理方式：把线上的改动同步回仓库并走一次正常部署，或确认线上改动可丢弃。"
+            } >> $GITHUB_STEP_SUMMARY
+            echo "::error::线上与仓库不一致"
+            exit 1
+          fi
+          echo "✅ 线上与仓库一致，无漂移" >> $GITHUB_STEP_SUMMARY
+          echo "线上与仓库一致"

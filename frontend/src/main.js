@@ -1047,7 +1047,7 @@ const GO_DIMS=[['win','赢面 C139'],['rel','关系密度'],['comm','沟通热�
 const GO_WEIGHTS_DEFAULT={win:30,rel:20,comm:12,comp:15,value:15,health:8};
 const GO_TIERS=[{k:'must',min:70,label:'重点投入'},{k:'watch',min:50,label:'观察加力'},{k:'drop',min:0,label:'暂缓/放弃'}];
 function clamp(v,a,b){return Math.max(a,Math.min(b,Math.round(v)))}
-function daysSince(d){if(!d)return 999;const t=new Date(String(d).slice(0,10)+'T00:00:00');if(isNaN(t.getTime()))return 999;
+function daysSince(d){if(!d)return null;const t=new Date(String(d).slice(0,10)+'T00:00:00');if(isNaN(t.getTime()))return null;
   return Math.floor((new Date(today()+'T00:00:00').getTime()-t.getTime())/86400000)}
 function goWeights(){
   const src=(store.ui&&store.ui.weights)||{};const out={};let sum=0;
@@ -1080,18 +1080,24 @@ function goScore(p){
   if(!people.length){rel=0;missing.push('未录入关键人')}
   rel=clamp(rel,0,100);
   /* C 沟通热度：近 30/60 天跟进次数 + 距今间隔 + 跟进人覆盖角色数 */
-  const n30=fu.filter(x=>daysSince(x.date)<=30).length, n60=fu.filter(x=>daysSince(x.date)<=60).length;
-  const gap=fu.length?Math.min.apply(null,fu.map(x=>daysSince(x.date))):999;
+  /* 只对「有有效日期」的跟进统计间隔；无日期的既不计入热度，也不参与取最小值
+     （否则 Math.min 会把 null 当 0，让一条没有日期的记录把沟通热度顶到满分）*/
+  const _gaps=fu.map(x=>daysSince(x.date)).filter(n=>n!==null);
+  const n30=_gaps.filter(n=>n<=30).length, n60=_gaps.filter(n=>n<=60).length;
+  const gap=_gaps.length?Math.min.apply(null,_gaps):null;
   const byRoles=new Set(fu.map(x=>x.by).filter(Boolean)).size;
   let comm=Math.min(60,n30*20)+Math.min(20,(n60-n30)*7)+(gap<=14?20:gap<=30?14:gap<=45?7:0)+(byRoles>=3?10:byRoles>=2?5:0);
-  if(!fu.length){comm=0;missing.push('无跟进记录')}else if(gap>60)flags.push('已 '+gap+' 天没有跟进');
+  if(!fu.length){comm=0;missing.push('无跟进记录')}
+  else if(gap===null){missing.push('跟进记录缺少有效日期')}
+  else if(gap>60)flags.push('已 '+gap+' 天没有跟进');
   comm=clamp(comm,0,100);
   /* D 竞争位势：是否掌握对手报价、情报条数与新鲜度、是否识别强弱、在位承建商扣分 */
   let comp;
   if(!intel.length){comp=50;missing.push('未录入对手情报')}
   else{
     const last=intel.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
-    comp=(last.price?30:0)+(intel.length>=2?20:10)+(daysSince(last.date)<=90?20:5)+(last.weaknesses?15:0)+(last.strengths?10:0);
+    const _ld=daysSince(last.date);
+    comp=(last.price?30:0)+(intel.length>=2?20:10)+(_ld!==null&&_ld<=90?20:5)+(last.weaknesses?15:0)+(last.strengths?10:0);
     if(/一期|承建|粘性|关系深|在位/.test(String(last.strengths||''))){comp-=25;flags.push('对手是在位承建商（关系型竞争）')}
     if(!last.price)missing.push('不掌握对手报价');
     comp=clamp(comp,0,100);
@@ -1150,7 +1156,7 @@ function goPrompt(p,g){
     '项目：'+p.name+'（甲方：'+p.customer+'；阶段：'+p.stage+'；自评级别：'+(p.oppLevel||'—')+'；销售：'+(p.sales||'—')+'；售前：'+(p.presales||'—')+'）',
     '当前进展：'+(p.progressText||'（未填写）'),
     '管理提示：'+(g.flags.length?g.flags.join('；'):'无'),
-    '六维指标（0-100；权重 '+JSON.stringify(w)+'）：赢面 '+g.dims.win+'（C139 '+g.c139+'%）｜关系 '+g.dims.rel+'（关键角色覆盖 '+g.cov+'，共 '+g.people+' 人）｜沟通 '+g.dims.comm+'（近30天跟进 '+g.n30+' 次，距今 '+(g.gap>900?'无记录':g.gap+' 天')+'）｜竞争 '+g.dims.comp+'（对手情报 '+g.intel+' 条）｜价值 '+g.dims.value+'（预估 '+g.est+' 万，软件 '+g.sw+' 万，中标 '+(g.won||'未定')+' 万，成本 '+(g.cost||'未定')+' 万，毛利 '+(g.profit||'未定')+' 万，毛利率 '+(g.margin==null?'未定':g.margin+'%')+'）｜健康 '+g.dims.health+'（逾期下一步 '+g.over+' 项，高风险未关闭 '+g.hiRisk+' 项）',
+    '六维指标（0-100；权重 '+JSON.stringify(w)+'）：赢面 '+g.dims.win+'（C139 '+g.c139+'%）｜关系 '+g.dims.rel+'（关键角色覆盖 '+g.cov+'，共 '+g.people+' 人）｜沟通 '+g.dims.comm+'（近30天跟进 '+g.n30+' 次，距今 '+(g.gap==null?'无有效记录':g.gap+' 天')+'）｜竞争 '+g.dims.comp+'（对手情报 '+g.intel+' 条）｜价值 '+g.dims.value+'（预估 '+g.est+' 万，软件 '+g.sw+' 万，中标 '+(g.won||'未定')+' 万，成本 '+(g.cost||'未定')+' 万，毛利 '+(g.profit||'未定')+' 万，毛利率 '+(g.margin==null?'未定':g.margin+'%')+'）｜健康 '+g.dims.health+'（逾期下一步 '+g.over+' 项，高风险未关闭 '+g.hiRisk+' 项）',
     '本地规则分：'+g.score+'（'+g.tierLabel+'）',
     '数据缺口：'+(g.missing.length?g.missing.join('、'):'无'),
     '请只输出一行 JSON，不要任何多余文字，格式：{"score":0-100,"verdict":"GO|谨慎GO|NO-GO","reasons":["理由1","理由2","理由3"],"gaps":["还要补什么"],"action":"一句话行动建议"}',
@@ -1446,10 +1452,13 @@ function renderDash(){
     <span style="flex:1"></span><button class="btn sm ghost" onclick="goOpenWeights()">⚖ 权重设置</button>
     <small style="color:var(--sub)">权重：赢面 ${w0.win} / 关系 ${w0.rel} / 沟通 ${w0.comm} / 竞争 ${w0.comp} / 价值 ${w0.value} / 健康 ${w0.health}</small>`;
   const goSlot=document.getElementById('dashGo'), noSlot=document.getElementById('dashNoGo');
-  if(goSlot)goSlot.innerHTML=scored.length?'<table>'+scored.filter(x=>x.g.tier!=='data').slice(0,5).map(x=>goRowHtml(x.p,x.g)).join('')+'</table>':'<div class="empty">当前口径下没有在跟项目</div>';
+  /* 两栏各自按档位取，不再用「最低分 N 个」凑数——
+     否则在跟项目 ≤ 显示上限时，左栏（最高分）与右栏（最低分）会是同一批项目的正倒序，
+     同一个项目同时被判「重点投入」和「暂缓/放弃」。*/
+  const goList=scored.filter(x=>x.g.tier==='must'), noList=scored.filter(x=>x.g.tier==='drop');
+  if(goSlot)goSlot.innerHTML=goList.length?'<table>'+goList.slice(0,8).map(x=>goRowHtml(x.p,x.g)).join('')+'</table>':'<div class="empty">当前口径下没有「重点投入」项目</div>';
   if(noSlot){
-    const tail=scored.filter(x=>x.g.tier!=='data').slice().reverse();
-    noSlot.innerHTML=tail.length?'<table>'+tail.slice(0,5).map(x=>goRowHtml(x.p,x.g)).join('')+'</table>':'<div class="empty">暂无可评估项目</div>';
+    noSlot.innerHTML=noList.length?'<table>'+noList.slice(0,8).map(x=>goRowHtml(x.p,x.g)).join('')+'</table>':'<div class="empty">当前口径下没有「暂缓 / 放弃」项目</div>';
     const bad=scored.filter(x=>x.g.flags.length).slice(0,4);
     noSlot.innerHTML+=bad.length?`<div class="hint" style="margin-top:10px"><b>判断背离提示</b>${bad.map(x=>`<div>· ${esc(x.p.name)}：${esc(x.g.flags[0])}</div>`).join('')}</div>`:'';
   }

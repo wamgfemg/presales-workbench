@@ -31,10 +31,10 @@ const code =
   cut('/* ================= 商机投入决策', '/* ================= 仪表盘') +
   cut('/* ================= 仪表盘', '/* ================= 二期：跟进记录') +
   cut('/* ================= 二期：跟进记录', '/* ================= 数据备份') +
-  cut('/* ================= 干系人管理', '/* ================= 合同管理') +
+  cut('/* ================= 决策链', '/* ================= 合同管理') +
   cut('/* ================= 合同管理', '/* ================= 报价管理') +
   cut('/* ================= 报价管理', '/* ================= 竞争情报') +
-  cut('/* ================= 通用页面项目选择器', '/* ================= 干系人管理') +
+  cut('/* ================= 通用页面项目选择器', '/* ================= 决策链') +
   cut('/* ================= 竞争情报', 'function openCiModal') +
   cut('function seed(){', '/* ================= 服务端落库同步') +
   '\nfunction schedulePush(){}\n'
@@ -42,8 +42,8 @@ const code =
 const boot = new Function('document', 'localStorage', 'window', 'fixedToday', code + `
   today=()=>fixedToday;
   seed();
-  return {store, renderProjects, renderStakeholders, renderContracts, renderQuotations, renderCompintel, renderChain,
-    parseTerms, ensurePayments, projVal, chainCoverage, sumQtCost, sumQtQuote, projHasWarn, projYearOf, projectsInView,
+  return {store, renderProjects, renderContracts, renderQuotations, renderCompintel, renderChain,
+    projVal, chainCoverage, sumQtCost, sumQtQuote, projHasWarn, projYearOf, projectsInView,
     goScore, goWeights, goSummary, goParseJson, goPrompt, renderDtGo, DEFAULTS: GO_WEIGHTS_DEFAULT,
     trendData, trendSvgHtml, setTrendMode, qaCtx, qaBuildPrompt, renderQa,
     renderDash, pfSet, goProjects, setFyYear, inYear, getPF: () => PF, getSort: () => projSort,
@@ -130,36 +130,21 @@ T('价格空间提示（860-810=50）', qt.includes('价格空间 50'))
 T('状态可流转（含中标价）', qt.includes('中标价</option>'))
 
 /* ---- 3. 合同回款 ---- */
-T('parseTerms 解析 3:6:1', JSON.stringify(H.parseTerms('3:6:1').map(x => x.ratio)) === '[30,60,10]', JSON.stringify(H.parseTerms('3:6:1').map(x => x.ratio)))
-T('parseTerms 解析含文字条款', JSON.stringify(H.parseTerms('预付30%、到货60%、质保10%').map(x => x.ratio)) === '[30,60,10]')
-T('parseTerms 无数字时返回空', H.parseTerms('验收后一次性付清').length === 0)
-const cc = { paymentTerms: '3:6:1' }
-const plan = H.ensurePayments(cc, 796)
-T('回款金额分摊且合计=合同额', Math.round(plan.reduce((s, x) => s + x.amount, 0) * 10) / 10 === 796, plan.map(x => x.amount).join('+'))
-cc.payments[1].paid = true; cc.payments[1].paidDate = '2026-09-01'
-H.ensurePayments(cc, 796)
-T('重算保留已标记的回款', cc.payments[1].paid === true && cc.payments[1].paidDate === '2026-09-01')
+/* 注：原 parseTerms（回款条款解析）与 ensurePayments（回款计划生成）已随合同模块
+   重构为 ct* 系列而移除，这 5 条断言随之撤销；合同页渲染断言见下。 */
 document.getElementById('ctBody').innerHTML = ''
 H.renderContracts()
 const ct = document.getElementById('ctBody').innerHTML
-T('合同页显示逾期回款提醒', ct.includes('期回款已逾期'))
-T('合同页显示回款率 30%', ct.includes('回款率 30%'))
-T('合同页显示交付倒计时 24 天', ct.includes('距交付/到期日 24 天'), (ct.match(/距交付\/到期日 \d+ 天/) || []).join())
-T('合同状态下拉含已结清', ct.includes('已结清'))
+/* 合同已重构为「清单台账」：不再有回款计划 / 交付倒计时 / 合同状态字段，
+   断言改为校验台账表头、数据行与附件入口 */
+T('合同台账渲染出表头列（编号 / 甲方 / 总额 / 附件）', ct.includes('合同编号') && ct.includes('合同甲方') && ct.includes('合同总额') && ct.includes('合同附件'))
+T('合同台账渲染出数据行（已中标项目自动进清单）', (ct.match(/<tr>/g) || []).length >= 2, (ct.match(/<tr>/g) || []).length)
+T('合同台账含附件上传入口', ct.includes('上传'))
+T('合同金额按「万」格式化或占位', /万|—/.test(ct))
 
 /* ---- 4. 干系人矩阵 / 决策链 / 竞争情报 ---- */
-document.getElementById('stkBody').innerHTML = ''
-H.renderStakeholders()
-const stk = document.getElementById('stkBody').innerHTML
-T('p1 必备角色已覆盖 4/4', stk.includes('必备角色已覆盖 4/4'))
-T('p1 有教练，不出现教练告警', !stk.includes('尚无教练'))
-T('矩阵含「未知」立场列', stk.includes('未知'))
-document.getElementById('stkProj').value = 'p2'
-document.getElementById('stkBody').innerHTML = ''
-H.renderStakeholders()
-const stk2 = document.getElementById('stkBody').innerHTML
-T('p2 提示缺三个必备角色', stk2.includes('必备角色缺：决策者、最终审批人、采购负责人'))
-T('p2 提示无教练且给出 50% 上限', stk2.includes('尚无教练/内线') && stk2.includes('50%'))
+/* 注：原 renderStakeholders（干系人九宫格）已并入决策链 renderChain，
+   这 5 条断言随之撤销；决策链渲染断言见下。 */
 document.getElementById('chainBody').innerHTML = ''
 H.renderChain()
 T('决策链页正常渲染', document.getElementById('chainBody').innerHTML.length > 3000, document.getElementById('chainBody').innerHTML.length)
@@ -254,8 +239,10 @@ T('提示词要求不编造缺失数据', bp.includes('不要编造'))
 document.getElementById('qaMsgs').innerHTML = ''
 document.getElementById('qaQuick').innerHTML = ''
 H.renderQa()
-T('问答页渲染出 6 个快捷问题', (document.getElementById('qaQuick').innerHTML.match(/tag clickable/g) || []).length === 6, (document.getElementById('qaQuick').innerHTML.match(/tag clickable/g) || []).length)
-T('空态说明回答基于已录入数据', document.getElementById('qaMsgs').innerHTML.includes('已录入的数据'))
+/* 问答页已改版：无对话时快捷问题由 hero 区（qa-ex 按钮）承载，qaQuick 隐藏；
+   命中判定同步由「tag clickable」改为「qa-ex」，条数仍为 6 */
+T('问答页渲染出 6 个快捷问题', (document.getElementById('qaMsgs').innerHTML.match(/qa-ex/g) || []).length === 6, (document.getElementById('qaMsgs').innerHTML.match(/qa-ex/g) || []).length)
+T('空态说明回答基于已录入数据', document.getElementById('qaMsgs').innerHTML.includes('真实数据'))
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败')
 process.exit(fail ? 1 : 0)
