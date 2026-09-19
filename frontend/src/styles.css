@@ -567,3 +567,12 @@ body.auth-pending #app{display:none!important}
 .mt-table th,.mt-table td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
 .mt-table th{background:#f8fafd;color:var(--sub);font-size:10.0px}
 .mt-chip{display:inline-block;background:#eef1f9;color:#3a4358;border-radius:14px;padding:3px 10px;font-size:10.0px;margin:3px 4px 0 0}
+
+/* ===== 导航分组标题层级优化（2026-09-19）===== */
+.nav-group{margin:10px 0 2px}
+.nav-group-title{font-size:12px;color:#aab8de;font-weight:700;letter-spacing:1.5px;padding:9px 10px 8px;border-radius:8px;gap:7px;transition:background .15s,color .15s}
+.nav-group-title::before{content:'';width:3px;height:12px;border-radius:2px;background:var(--grad);flex-shrink:0;opacity:.95}
+.nav-group-title:hover{background:rgba(255,255,255,.06);color:#cdd8f5}
+.nav-group-title .cg{font-size:10px;opacity:.65;font-weight:600;transition:transform .15s;display:inline-block;margin-left:auto}
+.nav-group.collapsed .nav-group-title{color:#8b99bf}
+.nav-group.collapsed .nav-group-title::before{opacity:.5}
