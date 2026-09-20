@@ -126,7 +126,7 @@ function show(p){
   if(p==='compintel')renderCompintel();
   if(p==='requirements')renderRequirements();
   if(p==='users'&&window.renderUsers)renderUsers();
-  if(p==='settings')renderSettings();
+  if(p==='data')renderSettings();
   if(p==='market'&&window.renderMarket)renderMarket();
   if(p==='marketdaily'&&window.renderMarketDaily)renderMarketDaily();
   if(p==='aidaily'&&window.renderAidaily)renderAidaily();

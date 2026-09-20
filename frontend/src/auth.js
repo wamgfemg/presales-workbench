@@ -28,7 +28,7 @@
     document.querySelectorAll('#nav button[data-p]').forEach(function (b) {
       var p = b.getAttribute('data-p')
       if (p === 'users') { b.style.display = (ME.role === 'admin') ? '' : 'none'; return }
-      if (p === 'settings') return
+      if (p === 'account' || p === 'data') return
       if (p === 'mytodo') { b.style.display = (ME.role === 'admin' || canView('projects')) ? '' : 'none'; return }
       if (ME.role === 'admin') return
       if (!canView(p)) b.style.display = 'none'
@@ -37,7 +37,6 @@
     var fu = document.getElementById('curUser'); if (fu) fu.textContent = ME.username + (ME.role === 'admin' ? '（管理员）' : '')
     ;['btnPw', 'btnLogout'].forEach(function (i) { var e = document.getElementById(i); if (e) e.style.display = '' })
     if (ME.mustChange) { var t = document.getElementById('pwWarn'); if (t) t.style.display = '' }
-    if (ME.role === 'admin') { var uc = document.getElementById('setUsersCard'); if (uc) uc.style.display = '' }
   }
 
   /* ---------- 用户管理 ---------- */
