@@ -28,7 +28,9 @@
     document.querySelectorAll('#nav button[data-p]').forEach(function (b) {
       var p = b.getAttribute('data-p')
       if (p === 'users') { b.style.display = (ME.role === 'admin') ? '' : 'none'; return }
-      if (p === 'account' || p === 'data' || p === 'quoteagent' || p === 'custintel' || p === 'orgasset') return
+      // 未纳入服务端 MODULES 权限表的工作页（系统页 + 运营页 + 新增 Agent 页）：登录即可见，不做模块级显隐
+      if (p === 'account' || p === 'data' || p === 'quoteagent' || p === 'custintel' || p === 'orgasset'
+        || p === 'capacity' || p === 'customer360' || p === 'funnel' || p === 'minutes' || p === 'metrics') return
       if (p === 'mytodo') { b.style.display = (ME.role === 'admin' || canView('projects')) ? '' : 'none'; return }
       if (ME.role === 'admin') return
       if (!canView(p)) b.style.display = 'none'
