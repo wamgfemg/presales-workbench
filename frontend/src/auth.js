@@ -28,13 +28,14 @@
     document.querySelectorAll('#nav button[data-p]').forEach(function (b) {
       var p = b.getAttribute('data-p')
       if (p === 'users') { b.style.display = (ME.role === 'admin') ? '' : 'none'; return }
-      if (p === 'account' || p === 'data') return
+      if (p === 'account' || p === 'data' || p === 'quoteagent' || p === 'custintel' || p === 'orgasset') return
       if (p === 'mytodo') { b.style.display = (ME.role === 'admin' || canView('projects')) ? '' : 'none'; return }
       if (ME.role === 'admin') return
       if (!canView(p)) b.style.display = 'none'
     })
     var su = document.getElementById('sideUser'); if (su) su.style.display = ''
     var fu = document.getElementById('curUser'); if (fu) fu.textContent = ME.username + (ME.role === 'admin' ? '（管理员）' : '')
+    var bap = document.getElementById('btnAllProjects'); if (bap) bap.style.display = (ME.role === 'admin') ? '' : 'none'
     ;['btnPw', 'btnLogout'].forEach(function (i) { var e = document.getElementById(i); if (e) e.style.display = '' })
     if (ME.mustChange) { var t = document.getElementById('pwWarn'); if (t) t.style.display = '' }
   }
@@ -84,7 +85,7 @@
   function authBoot() {
     fetch('/api/me', { cache: 'no-store' }).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j } }).catch(function () { return { status: r.status, body: {} } }) }).then(function (r) {
       if (r.status === 200 && r.body.ok) {
-        ME = r.body.user; MODULES = r.body.modules || []
+        ME = r.body.user; window.__ME = ME; MODULES = r.body.modules || []
         document.body.classList.remove('auth-pending'); hideLogin(); applyPerms()
         if (typeof bootApp === 'function') bootApp()
         if (ME.role !== 'admin' && !canView('dash')) { var f = MODULES.find(function (m) { return canView(m.key) }); if (f) show(f.key) }

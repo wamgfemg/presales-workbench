@@ -1,8 +1,10 @@
 
 /* ================= 数据层 ================= */
-const LS_KEY='presales_workbench_v5';
+const LS_KEY='presales_workbench_v5'; // 旧版全局缓存 key；新版按账号命名空间（见 lsKey）
+var ME=null; // 当前登录用户：auth.js 注入 window.__ME，bootApp 时赋值；驱动多用户分桶与权限
+function lsKey(){ return LS_KEY + '_' + ((ME&&ME.id)||'boot') } // 按账号命名空间，避免同一浏览器多账号串数据
 let store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
-  stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{},ui:{}};
+  stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},custintel:[],orgassets:[],followups:{},ui:{}};
 let editingProjectId=null, currentProjectId=null, kbEditingId=null;
 
 const DEF_CATS=['产品资料','案例库','技术方案素材','公司资质与实力','竞品情报','话术与FAQ','模板与规范'];
@@ -45,8 +47,8 @@ function yearSelectHtml(id){
     ${projYears().map(y=>`<option value="${y}"${y===fyYear?' selected':''}>${y} 年</option>`).join('')}</select>`
 }
 function yearTag(){return fyYear==='all'?'全部年度':fyYear+' 年'}
-function persist(){try{localStorage.setItem(LS_KEY,JSON.stringify(store))}catch(e){}try{schedulePush()}catch(e){}}
-function load(){try{const s=localStorage.getItem(LS_KEY);if(s)store=JSON.parse(s)}catch(e){}
+function persist(){try{localStorage.setItem(lsKey(),JSON.stringify(store))}catch(e){}try{schedulePush()}catch(e){}}
+function load(){try{const s=localStorage.getItem(lsKey());if(s)store=JSON.parse(s)}catch(e){}
   if(!store.projects)store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
     stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{},ui:{}};
   if(!store.tasks)store.tasks=[];if(!store.docs)store.docs=[];if(!store.checklists)store.checklists={};
@@ -125,6 +127,9 @@ function show(p){
   if(p==='quotations')renderQuotations();
   if(p==='compintel')renderCompintel();
   if(p==='requirements')renderRequirements();
+  if(p==='quoteagent')renderQuoteAgent();
+  if(p==='custintel')renderCustIntel();
+  if(p==='orgasset')renderOrgAsset();
   if(p==='users'&&window.renderUsers)renderUsers();
   if(p==='data')renderSettings();
   if(p==='market'&&window.renderMarket)renderMarket();
@@ -170,7 +175,7 @@ function saveProject(){
   if(!pfName.value.trim()||!pfCust.value.trim()){toast('请填写项目名称与甲方名称');return}
   if(LOST_STAGES.includes(pfStage.value)&&!pfLost.value.trim()){toast('请填写「'+pfStage.value+'」原因');return}
   const base={name:pfName.value.trim(),customer:pfCust.value.trim(),stage:pfStage.value,oppLevel:pfOpp.value,
-    sales:pfSales.value.trim(),presales:pfPre.value.trim(),
+    sales:pfSales.value.trim(),presales:pfPre.value.trim(),ownerId:(ME&&ME.id)||'anon',
     amounts:{estTotal:num0(pfEst.value),software:num0(pfSoft.value),won:num0(pfWon.value),cost:num0(pfCost.value)},
     expectSignMonth:pfExpect.value,actualSignMonth:pfActual.value,keyDate:pfDate.value,source:pfBg.value,
     lostReason:LOST_STAGES.includes(pfStage.value)?pfLost.value.trim():''};
@@ -278,6 +283,30 @@ function renderProjects(){
 }
 function filterStage(s){document.getElementById('projStageFilter').value=s;renderProjects()}
 
+/* ================= 管理员「查看全部账号项目」（只读） ================= */
+var _allProjUsers=null;
+function openAllProjects(){
+  if(!ME||ME.role!=='admin'){toast('仅管理员可查看全部账号数据');return}
+  openMask('mAllProjects');
+  renderAllProjects();
+}
+async function renderAllProjects(){
+  var body=document.getElementById('allProjBody'); if(!body)return;
+  if(!lastServerStates){body.innerHTML='<div class="empty">暂无可聚合的数据（请稍候自动同步后重试）</div>';return}
+  // 聚合所有账号的 projects 集合（按服务器 key 反查归属）
+  var byOwner={};
+  for(var key in lastServerStates){ if(!Object.prototype.hasOwnProperty.call(lastServerStates,key))continue; if(_stripShard(key)!=='projects')continue; var owner=_ownerOfServerKey(key); var arr=lastServerStates[key].data; if(!Array.isArray(arr))continue; (byOwner[owner]=byOwner[owner]||[]).push.apply(byOwner[owner],arr); }
+  var owners=Object.keys(byOwner);
+  if(!owners.length){body.innerHTML='<div class="empty">尚无任何账号的项目数据</div>';return}
+  var nameOf=function(id){ if(id==='admin')return '管理员(我)'; if(_allProjUsers){var u=_allProjUsers.find(function(x){return x.id===id}); if(u)return u.username;} return id; };
+  var rows=[];
+  owners.forEach(function(owner){ (byOwner[owner]||[]).forEach(function(p){ rows.push({owner:owner,name:nameOf(owner),p:p}); }); });
+  rows.sort(function(a,b){ return String(a.owner).localeCompare(String(b.owner),'zh') || String(a.p.name).localeCompare(String(b.p.name),'zh'); });
+  body.innerHTML='<div class="hint" style="margin-bottom:10px">管理员只读视图：展示<b>全部账号</b>的项目，数据按账号严格隔离，不可在此直接编辑（代为维护将在 V2 提供）。共 <b>'+rows.length+'</b> 个项目，分布在 <b>'+owners.length+'</b> 个账号。</div>'+
+    '<div style="overflow-x:auto"><table><tr><th>归属账号</th><th>项目</th><th>甲方</th><th>阶段</th><th>预估(万)</th><th>售前</th><th>销售</th></tr>'+
+    rows.map(function(r){var p=r.p;var m=amountsOf(p);return '<tr><td>'+esc(r.name)+'</td><td>'+esc(p.name||'')+'</td><td>'+esc(p.customer||'')+'</td><td>'+stageBadge(p.stage)+'</td><td>'+(m.est?fmtWan(m.est):'—')+'</td><td>'+esc(p.presales||'—')+'</td><td>'+esc(p.sales||'—')+'</td></tr>';}).join('')+'</table></div>';
+}
+
 /* ================= 项目详情 ================= */
 let dtTab='info';
 function openDetail(id){currentProjectId=id;dtTab='info';show('detail');renderDetail()}
@@ -300,8 +329,8 @@ function renderDetail(){
     return `<div class="step ${cls}"><div class="dot">${i<ci?'✓':i+1}</div>${st}</div>`}).join('')+
     (lost?`<div class="step cur"><div class="dot" style="background:var(--bad);color:#fff">✕</div>${p.stage}</div>`:'');
   document.querySelectorAll('#dtTabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===dtTab));
-  document.getElementById('dtBody').innerHTML=({renderDtInfo,renderDtFollow,renderDtPlan,renderDtRisk,renderDtTask,renderDtTl,renderDtGo,renderDtC139,renderDtDoc,renderDtStk,renderDtContract})[
-    {info:'renderDtInfo',fu:'renderDtFollow',plan:'renderDtPlan',risk:'renderDtRisk',task:'renderDtTask',tl:'renderDtTl',go:'renderDtGo',c:'renderDtC139',doc:'renderDtDoc',stk:'renderDtStk',contract:'renderDtContract'}[dtTab]](p);
+  document.getElementById('dtBody').innerHTML=({renderDtInfo,renderDtReq,renderDtCi,renderDtFollow,renderDtPlan,renderDtRisk,renderDtTask,renderDtTl,renderDtGo,renderDtC139,renderDtDoc,renderDtStk,renderDtContract})[
+    {info:'renderDtInfo',rq:'renderDtReq',ci:'renderDtCi',fu:'renderDtFollow',plan:'renderDtPlan',risk:'renderDtRisk',task:'renderDtTask',tl:'renderDtTl',go:'renderDtGo',c:'renderDtC139',doc:'renderDtDoc',stk:'renderDtStk',contract:'renderDtContract'}[dtTab]](p);
 }
 document.getElementById('dtTabs').addEventListener('click',e=>{const b=e.target.closest('button');if(b){dtTab=b.dataset.t;renderDetail()}});
 
@@ -1587,7 +1616,7 @@ function resetDemo(){
   if(!confirm('重置为演示数据？当前服务器与本机的工作数据将被覆盖。'))return;
   store={projects:[],kb:[],docs:[],tasks:[],kbTree:[],pdocs:{},checklists:{},
     stakeholders:{},contracts:{},quotations:{},compintel:[],requirements:{},followups:{},ui:{}};
-  _sent={};_rev={};
+  _baseline={};_rev={};
   seed();persist();
   pushImportToServer().then(function(){show('dash');renderDash();renderProjects();toast('已重置为演示数据')});
 }
@@ -2087,6 +2116,7 @@ function delQuotation(id){if(!confirm('确定删除该报价？'))return;const p
 
 /* ================= 竞争情报 ================= */
 function renderCompintel(){
+  ciCtxProject=null;
   const el=document.getElementById('ciBody');
   const sel=document.getElementById('ciProjFilter');
   const cur=sel.value;
@@ -2249,6 +2279,331 @@ function jumpToPdocsInput(pid){
   pdPid=pid;pdTab='input';pdFolder='root';show('pdocs');toast('已切换到项目知识库 · 输入分类');
 }
 
+/* ================= 需求 / 竞争情报：详情页上下文（与独立菜单共用同一份数据） ================= */
+var rqCtxProject=null, ciCtxProject=null;
+function _pageOn(id){var e=document.getElementById(id);return !!(e&&e.classList.contains('on'))}
+function rqPid(){return rqCtxProject||((document.getElementById('rqProj')||{}).value||'')}
+function afterReqChange(){ if(rqCtxProject&&_pageOn('p-detail'))renderDetail(); else if(_pageOn('p-requirements'))renderRequirements() }
+function afterCiChange(){ if(ciCtxProject&&_pageOn('p-detail'))renderDetail(); else if(_pageOn('p-compintel'))renderCompintel() }
+
+function renderDtReq(p){
+  const list=store.requirements[p.id]||[];
+  const cnt={high:0,pending:0};list.forEach(r=>{cnt[r.priority]=(cnt[r.priority]||0)+1;cnt[r.status]=(cnt[r.status]||0)+1});
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div><h3 style="margin:0">需求管理</h3><div style="font-size:12px;color:var(--sub)">共 ${list.length} 条 · 高优 ${cnt.high} · 待分析 ${cnt.pending} · 与「项目作战 · 需求管理」同一份数据</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn ghost" onclick="jumpToPdocsInput('${p.id}')">汇入项目知识库 →</button>
+      <button class="btn" onclick="rqCtxProject='${p.id}';openRequirementModal()">＋ 新增需求</button></div></div>
+    ${list.length?`<div style="overflow-x:auto"><table><tr><th>标题</th><th>类别</th><th>优先级</th><th>来源</th><th>提出方</th><th>状态</th><th>验收标准</th><th>分析结论</th><th style="width:120px">操作</th></tr>`+
+    list.map(r=>`<tr><td><b>${esc(r.title)}</b></td><td>${esc(r.category||'—')}</td><td>${priorityBadge(r.priority)}</td>
+      <td>${esc(r.source||'—')}</td><td>${esc(r.owner||'—')}</td><td>${reqStatusBadge(r.status)}</td>
+      <td style="max-width:190px">${esc(r.acceptance||'—')}</td>
+      <td style="max-width:230px">${esc(r.analysis||'—')}</td>
+      <td><button class="btn sm ghost" onclick="rqCtxProject='${p.id}';openRequirementModal('${r.id}')">编辑</button>
+      <button class="btn sm danger" onclick="rqCtxProject='${p.id}';delRequirement('${r.id}')">删除</button></td></tr>`).join('')+'</table></div>'
+    :'<div class="empty">暂无需求，点击右上角新增，或去项目知识库录入原始输入后汇入</div>'}
+  </div>`;
+}
+
+function renderDtCi(p){
+  const list=store.compintel.filter(x=>x.projectId===p.id).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const qs=(store.quotations[p.id]||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  const mine=qs.length?sumQtQuote(qs[0]):0;
+  const rows=list.filter(x=>x.price!==undefined&&x.price!=='');
+  const cov=chainCoverage(p.id);
+  const m=amountsOf(p);
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div><h3 style="margin:0">竞争情报</h3><div style="font-size:12px;color:var(--sub)">${esc(p.customer)} · 共 ${list.length} 条 · 与「项目作战 · 竞争情报」同一份数据</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn ghost" onclick="show('compintel')">查看全部 →</button>
+      <button class="btn" onclick="ciCtxProject='${p.id}';openCiModal()">＋ 新增情报</button></div></div>
+    <div class="grid g4" style="font-size:13px;margin-bottom:12px">
+      <div><span style="color:var(--sub)">我方预估合同额</span><br><b>${m.est?fmtWan(m.est)+' 万':'—'}</b></div>
+      <div><span style="color:var(--sub)">我方最新报价</span><br><b>${mine?fmtWan(mine)+' 万':'未出报价'}</b>${qs[0]?`<br><small style="color:var(--sub)">${esc(qs[0].name)}</small>`:''}</div>
+      <div><span style="color:var(--sub)">已掌握对手报价</span><br><b>${rows.length?rows.map(r=>fmtWan(r.price)).join(' / '):'—'}</b></div>
+      <div><span style="color:var(--sub)">关键角色覆盖</span><br><b>${cov.covered}/${KEY_ROLES.length}</b><br><small style="color:var(--sub)">${cov.miss.length?'缺：'+cov.miss.join('、'):'已覆盖'}</small></div>
+    </div>
+    ${list.length?list.map(ci=>`<div class="kb-item"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <b>${esc(ci.competitor)}</b>${ci.product?`<span class="tag">${esc(ci.product)}</span>`:''}
+      <div style="flex:1"></div><span style="font-size:12px;color:var(--sub)">${esc(ci.date||'—')}</span>
+      <button class="btn sm ghost" onclick="ciCtxProject='${p.id}';openCiModal('${ci.id}')">编辑</button>
+      <button class="btn sm danger" onclick="ciCtxProject='${p.id}';delCompintel('${ci.id}')">删除</button></div>
+      <div class="grid g2" style="margin-top:10px;font-size:12.5px">
+        ${ci.price!==undefined&&ci.price!==''?`<div><span style="color:var(--sub)">对手报价</span><br><b>${esc(ci.price)} 万</b>${mine?` <small style="color:var(--sub)">我方 ${fmtWan(mine)} 万</small>`:''}</div>`:''}
+        ${ci.source?`<div><span style="color:var(--sub)">来源</span><br>${esc(ci.source)}</div>`:''}
+      </div>
+      ${ci.strategy?`<div class="body"><b>市场策略</b><br>${esc(ci.strategy)}</div>`:''}
+      ${ci.strengths||ci.weaknesses?`<div style="display:flex;gap:12px;margin-top:8px;font-size:12.5px">
+        ${ci.strengths?`<div style="flex:1;background:#e6f4ea;border-radius:8px;padding:10px"><b style="color:var(--bad)">对手优势</b><br>${esc(ci.strengths)}</div>`:''}
+        ${ci.weaknesses?`<div style="flex:1;background:#fde8ef;border-radius:8px;padding:10px"><b style="color:var(--ok)">对手弱点</b><br>${esc(ci.weaknesses)}</div>`:''}
+      </div>`:''}</div>`).join(''):'<div class="empty">暂无该项目的竞争情报，点击右上角新增</div>'}
+  </div>`;
+}
+
+/* ================= 智能报价 Agent ================= */
+function qtLatest(p){const qs=(store.quotations[p.id]||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));return qs[0]||null}
+function renderQuoteAgent(){
+  const sel=document.getElementById('qagProj');if(!sel)return;
+  const list=projectsInView();
+  sel.innerHTML=list.length?list.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join(''):'<option value="">— 暂无项目 —</option>';
+  if(!sel.value&&list.length)sel.value=list[0].id;
+  const el=document.getElementById('qagBody');const p=getProj(sel.value);
+  if(!p){el.innerHTML='<div class="card"><div class="empty">暂无项目，请先在「项目作战 · 项目管理」中创建</div></div>';return}
+  const m=amountsOf(p);const q=qtLatest(p);
+  const qtCost=q?sumQtCost(q):0, qtQuote=q?sumQtQuote(q):0;
+  const cost=qtCost||m.cost, est=m.est||m.sw;
+  const margin=qtQuote?Math.round((qtQuote-qtCost)/qtQuote*1000)/10:null;
+  const ci=store.compintel.filter(x=>x.projectId===p.id&&x.price!==undefined&&x.price!=='');
+  const rival=ci.map(x=>parseFloat(x.price)||0).filter(n=>n>0);
+  const minRival=rival.length?Math.min.apply(null,rival):0;
+  const floor=Math.round(cost*10)/10;
+  const target=cost?Math.round(cost/0.65*10)/10:0;
+  const ceil=est?Math.round(est*10)/10:0;
+  let rec=Math.max(floor,target); if(ceil&&rec>ceil)rec=ceil; if(!rec)rec=ceil;
+  const lo=Math.round(rec*0.95*10)/10, hi=Math.round(rec*1.05*10)/10;
+  const w=c139Stats(p.c139);
+  const tips=[];
+  if(!cost)tips.push('⚠ 尚未录入成本明细：请先到「报价管理」补齐各项成本，报价建议才具备约束力。');
+  if(margin!=null&&margin<25)tips.push('⚠ 当前报价毛利率仅 '+margin+'%，低于 25% 安全线；建议复核成本，或调整软件授权 / 三年维保占比来抬升毛利。');
+  if(margin!=null&&margin>=35)tips.push('当前报价毛利率 '+margin+'%，处于健康区间，价格不是主要矛盾，重心应放在技术分与关系覆盖。');
+  if(minRival&&rec){const gap=Math.round((rec-minRival)/rec*1000)/10;
+    if(gap>15)tips.push('⚠ 建议价高于已掌握最低对手价 '+minRival+' 万约 '+gap+'%：无价格优势，慎打价格战；优先用 TCO / 运维成本重构评标口径，并确认商务分权重。');
+    else if(gap<-10)tips.push('建议价低于对手约 '+Math.abs(gap)+'%：有价格空间，可把让利转成增值服务（三年维保、驻场、培训）抬高交付质量感知。');
+    else tips.push('建议价与对手报价接近：胜负手在技术分与关系覆盖，价格不宜再动。');}
+  else if(!ci.length)tips.push('尚无该项目对手报价：建议先在「竞争情报」补充，再锁定商务策略。');
+  if(ceil&&target>ceil)tips.push('目标价 '+target+' 万已超客户预算上限 '+ceil+' 万：需通过分期建设 / 提高软件授权占比来对齐预算。');
+  if(w.rate<50)tips.push('当前 C139 赢单率 '+w.rate+'%（'+w.tip+'）：报价宜保守，避免过早亮底价。');
+  if(!tips.length)tips.push('各项指标正常，按建议区间报价并守住一条让价底线即可。');
+  const cell=(lb,v,extra)=>`<div><span style="color:var(--sub)">${lb}</span><br><b>${v}</b>${extra||''}</div>`;
+  let h=`<div class="card"><h3>报价建议 · ${esc(p.name)}</h3>
+    <div class="grid g4" style="font-size:13px">
+      ${cell('预估合同额',m.est?fmtWan(m.est)+' 万':'—')}
+      ${cell('项目成本（报价明细合计）',cost?fmtWan(cost)+' 万':'未录入')}
+      ${cell('我方最新报价',qtQuote?fmtWan(qtQuote)+' 万':'未出报价',q?`<br><small style="color:var(--sub)">${esc(q.name)} · ${esc(q.status||'草稿')}</small>`:'')}
+      ${cell('最新报价毛利率',margin!=null?margin+'%':'—')}
+    </div>
+    <div class="hint" style="margin-top:12px"><b>建议报价区间：${lo?fmtWan(lo)+' ~ '+fmtWan(hi)+' 万':'需先补齐成本数据'}</b>　（保本价 ${floor?fmtWan(floor)+' 万':'—'} · 目标价（35% 毛利）${target?fmtWan(target)+' 万':'—'}${ceil?' · 客户预算上限 '+fmtWan(ceil)+' 万':''}${minRival?' · 对手最低 '+fmtWan(minRival)+' 万':''}）</div>
+  </div>`;
+  h+='<div class="card"><h3>竞争价格对位</h3>';
+  h+=ci.length?'<div style="overflow-x:auto"><table><tr><th>竞争对手</th><th>产品/方案</th><th>对手报价(万)</th><th>与我方建议价差</th><th>来源</th><th>日期</th></tr>'+
+    ci.map(x=>{const pr=parseFloat(x.price)||0;const d=rec&&pr?Math.round((rec-pr)/rec*1000)/10:null;
+      return `<tr><td><b>${esc(x.competitor)}</b></td><td>${esc(x.product||'—')}</td><td>${fmtWan(pr)}</td>
+      <td style="color:${d==null?'var(--sub)':d>0?'var(--bad)':'var(--ok)'}">${d==null?'—':(d>0?'我方高 '+d+'%':'我方低 '+Math.abs(d)+'%')}</td>
+      <td>${esc(x.source||'—')}</td><td>${esc(x.date||'—')}</td></tr>`}).join('')+'</table></div>'
+    :'<div class="empty">暂无该项目的竞争情报，建议补充对手报价后再定商务策略</div>';
+  h+='</div>';
+  h+='<div class="card"><h3>最新报价明细</h3>';
+  if(q&&(q.items||[]).length){
+    h+='<div style="overflow-x:auto"><table><tr><th>项目</th><th>数量</th><th>成本(万)</th><th>报价(万)</th><th>毛利(万)</th><th>毛利率</th><th>备注</th></tr>'+
+      q.items.map(it=>{const c=(parseFloat(it.cost)||0)*(parseFloat(it.qty)||1),s=(parseFloat(it.quote)||0)*(parseFloat(it.qty)||1);
+        const pf=s-c,r=s?Math.round(pf/s*1000)/10:null;
+        return `<tr><td>${esc(it.name)}</td><td>${it.qty||1}</td><td>${fmtWan(c)}</td><td>${fmtWan(s)}</td>
+        <td>${fmtWan(pf)}</td><td style="color:${r!=null&&r<25?'var(--bad)':'var(--ok)'}">${r!=null?r+'%':'—'}</td><td>${esc(it.remark||'')}</td></tr>`}).join('')+'</table></div>';
+  }else h+='<div class="empty">该项目暂无报价记录，请到「报价管理」新建</div>';
+  h+='</div>';
+  h+=`<div class="card"><h3>商务策略建议</h3><ul style="margin:0;padding-left:18px;line-height:1.9;font-size:12.5px">${tips.map(t=>'<li>'+t+'</li>').join('')}</ul>
+    <div class="hint" style="margin-top:10px">以上为规则版建议，基于工作台现有数据实时生成；接入外部情报与历史成单数据后，可由 Agent 输出动态报价策略。</div></div>`;
+  el.innerHTML=h;
+}
+
+/* ================= 客户情报 Agent ================= */
+const CUST_DIMS=['工商信息','舆情动态','招投标','公众号/自媒体','财报/经营','联系人履历','其他'];
+function custKey(c){return String(c||'').trim()}
+function renderCustIntel(){
+  const el=document.getElementById('cixBody');if(!el)return;
+  const kw=(document.getElementById('cixSearch')?document.getElementById('cixSearch').value:'').toLowerCase();
+  let list=store.custintel.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  if(kw)list=list.filter(x=>((x.customer||'')+(x.title||'')+(x.summary||'')+(x.dim||'')).toLowerCase().includes(kw));
+  const byC={};list.forEach(x=>{const k=custKey(x.customer)||'未填客户';(byC[k]=byC[k]||[]).push(x)});
+  const dimsSeen={};list.forEach(x=>{dimsSeen[x.dim||'其他']=1});
+  /* 内部数据融合：项目 / 干系人 */
+  const custMeta={};
+  store.projects.forEach(p=>{const k=custKey(p.customer);if(!k)return;const o=custMeta[k]=custMeta[k]||{projs:[],people:0,est:0};o.projs.push(p);o.est+=amountsOf(p).est});
+  store.projects.forEach(p=>{const k=custKey(p.customer);if(!k||!custMeta[k])return;custMeta[k].people+=((store.stakeholders||{})[p.id]||[]).length});
+  const names=Object.keys(byC).sort((a,b)=>byC[b].length-byC[a].length);
+  let h=`<div class="card"><h3>情报总览</h3><div class="grid g4" style="font-size:13px">
+    <div><span style="color:var(--sub)">已覆盖客户</span><br><b>${names.length}</b></div>
+    <div><span style="color:var(--sub)">情报条数</span><br><b>${list.length}</b></div>
+    <div><span style="color:var(--sub)">维度覆盖</span><br><b>${Object.keys(dimsSeen).length}/${CUST_DIMS.length}</b></div>
+    <div><span style="color:var(--sub)">在管项目</span><br><b>${store.projects.length}</b></div>
+  </div>
+  <div class="hint" style="margin-top:10px">外部情报（工商 / 舆情 / 招投标 / 公众号 / 财报 / 联系人履历）+ 内部数据（项目、干系人、决策链、报价）融合，才能形成真正「能对话」的客户画像。</div></div>`;
+  if(!names.length){h+='<div class="card"><div class="empty">暂无客户情报，点击右上角「＋ 录入情报」开始沉淀</div></div>';el.innerHTML=h;return}
+  h+=names.map(n=>{
+    const arr=byC[n];const meta=custMeta[n]||{projs:[],people:0,est:0};
+    const dims=[...new Set(arr.map(x=>x.dim||'其他'))];
+    return `<div class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <h3 style="margin:0">${esc(n)}</h3>
+      ${meta.projs.length?`<span class="tag">在管项目 ${meta.projs.length}</span>`:''}
+      ${meta.est?`<span class="tag">预估合计 ${fmtWan(Math.round(meta.est*10)/10)} 万</span>`:''}
+      ${meta.people?`<span class="tag">关键人 ${meta.people}</span>`:''}
+      <div style="flex:1"></div>
+      <button class="btn sm ghost" data-c="${esc(n)}" onclick="openCustPortrait(this.dataset.c)">◎ 客户画像</button>
+      <button class="btn sm ghost" data-c="${esc(n)}" onclick="openCustIntelModal(null,this.dataset.c)">＋ 补情报</button>
+    </div>
+    <div style="font-size:12px;color:var(--sub);margin-bottom:8px">维度：${dims.map(d=>esc(d)).join(' · ')}</div>
+    ${arr.map(x=>`<div class="kb-item"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="tag">${esc(x.dim||'其他')}</span><b>${esc(x.title)}</b><div style="flex:1"></div>
+      <span style="font-size:12px;color:var(--sub)">${esc(x.date||'—')}</span>
+      <button class="btn sm ghost" onclick="openCustIntelModal('${x.id}')">编辑</button>
+      <button class="btn sm danger" onclick="delCustIntel('${x.id}')">删除</button></div>
+      ${x.summary?`<div class="body">${esc(x.summary)}</div>`:''}
+      ${x.insight?`<div style="margin-top:6px;font-size:12.5px;background:#eef3fd;border-radius:8px;padding:8px 10px"><b>对售前的启示：</b>${esc(x.insight)}</div>`:''}
+      <div style="margin-top:6px;font-size:12px;color:var(--sub)">来源：${esc(x.source||'—')}</div>
+    </div>`).join('')}
+  </div>`}).join('');
+  el.innerHTML=h;
+}
+function custOptions(){return [...new Set([].concat(store.projects.map(p=>p.customer).filter(Boolean),store.custintel.map(x=>x.customer).filter(Boolean)))]}
+function openCustIntelModal(id,presetCustomer){
+  const x=id?store.custintel.find(v=>v.id===id):null;
+  document.getElementById('cixModalTitle').textContent=x?'编辑客户情报':'录入客户情报';
+  document.getElementById('cixId').value=x?x.id:'';
+  const dsel=document.getElementById('cixDim');
+  dsel.innerHTML=CUST_DIMS.map(d=>`<option>${esc(d)}</option>`).join('');
+  dsel.value=x?(x.dim||'其他'):'工商信息';
+  document.getElementById('cixCustomer').value=x?x.customer:(presetCustomer||'');
+  document.getElementById('cixTitle').value=x?x.title:'';
+  document.getElementById('cixDate').value=x?x.date:today();
+  document.getElementById('cixSource').value=x?x.source:'';
+  document.getElementById('cixSummary').value=x?x.summary:'';
+  document.getElementById('cixInsight').value=x?x.insight:'';
+  fillProjSelect('cixProj',x?(x.projectId||''):'');
+  const dl=document.getElementById('dlCustList');
+  if(dl)dl.innerHTML=custOptions().map(c=>`<option value="${esc(c)}">`).join('');
+  openMask('mCustIntel');
+}
+function saveCustIntel(){
+  const customer=document.getElementById('cixCustomer').value.trim();
+  const title=document.getElementById('cixTitle').value.trim();
+  if(!customer||!title){toast('请填写客户与标题');return}
+  const id=document.getElementById('cixId').value;
+  const data={id:id||uid(),customer,dim:document.getElementById('cixDim').value,title,
+    date:document.getElementById('cixDate').value,source:document.getElementById('cixSource').value.trim(),
+    projectId:document.getElementById('cixProj').value||null,
+    summary:document.getElementById('cixSummary').value.trim(),
+    insight:document.getElementById('cixInsight').value.trim(),updated:today()};
+  if(id){const i=store.custintel.findIndex(v=>v.id===id);if(i>-1)store.custintel[i]=data}
+  else store.custintel.unshift(data);
+  persist();closeMask('mCustIntel');renderCustIntel();toast('已保存');
+}
+function delCustIntel(id){if(!confirm('确定删除该条客户情报？'))return;store.custintel=store.custintel.filter(x=>x.id!==id);persist();renderCustIntel();toast('已删除')}
+function openCustPortrait(presetCustomer){
+  const cs=custOptions();
+  let c=presetCustomer;
+  if(!c){ if(!cs.length){toast('暂无客户数据，请先创建项目或录入客户情报');return}
+    c=window.prompt('输入客户名称生成画像：\n'+cs.slice(0,10).join(' / '),cs[0]); }
+  if(!c)return; c=String(c).trim(); if(!c)return;
+  const projs=store.projects.filter(p=>custKey(p.customer)===custKey(c));
+  const intel=store.custintel.filter(x=>custKey(x.customer)===custKey(c));
+  const people=[];projs.forEach(p=>{(store.stakeholders[p.id]||[]).forEach(s=>people.push(s))});
+  const cis=store.compintel.filter(x=>x.projectId&&projs.some(p=>p.id===x.projectId));
+  const att={support:'支持',neutral:'中立',oppose:'反对',unknown:'未知'};
+  const L=[];
+  L.push('【'+c+' · 客户画像】生成时间 '+today());
+  L.push('');
+  L.push('一、客户基本情况');
+  if(projs.length){const est=projs.reduce((s,p)=>s+amountsOf(p).est,0);
+    L.push('· 在管 / 跟进项目 '+projs.length+' 个'+(est?'，预估合同额合计 '+fmtWan(Math.round(est*10)/10)+' 万':''));
+    projs.forEach(p=>L.push('   - '+p.name+'（'+p.stage+' · 销售 '+(p.sales||'—')+' / 售前 '+(p.presales||'—')+'）'));
+  }else L.push('· 暂无在管项目记录');
+  L.push('');
+  L.push('二、外部情报（'+intel.length+' 条）');
+  if(intel.length){L.push('· 维度覆盖：'+[...new Set(intel.map(x=>x.dim||'其他'))].join('、'));
+    intel.slice(0,12).forEach(x=>L.push('   ['+(x.dim||'其他')+'] '+x.title+(x.date?'（'+x.date+'）':'')+(x.summary?'：'+x.summary:'')));
+  }else L.push('· 尚未录入外部情报，建议补充工商、招投标、公众号等公开信息');
+  L.push('');
+  L.push('三、关键人（'+people.length+' 人）');
+  if(people.length)people.slice(0,12).forEach(s=>L.push('   · '+(s.name||'—')+'：'+(s.dept||'')+(s.title?' / '+s.title:'')+'｜角色 '+(s.role||'—')+'｜立场 '+(att[s.attitude]||'—')+(s.focus?'｜关注：'+s.focus:'')));
+  else L.push('· 暂无干系人记录，建议在「决策链」补齐关键角色');
+  L.push('');
+  L.push('四、竞争位势');
+  if(cis.length)cis.forEach(x=>L.push('   · '+x.competitor+(x.price?'（报价 '+x.price+' 万）':'')+(x.weaknesses?'｜对手弱点：'+x.weaknesses:'')));
+  else L.push('· 暂无竞争对手情报');
+  L.push('');
+  L.push('五、可对话切入建议');
+  const tips=[];
+  if(intel.some(x=>x.dim==='招投标'))tips.push('客户近期有招投标动作 → 主动确认项目窗口与预算口径');
+  if(intel.some(x=>x.dim==='财报/经营'))tips.push('结合经营数据谈投入产出 → 用 TCO / 降本口径切入');
+  if(intel.some(x=>x.dim==='工商信息'))tips.push('用工商变更（注册资本、股东、经营范围）判断扩张与决策层变动');
+  if(people.some(s=>s.role==='决策者'||s.role==='最终审批人'))tips.push('已触达决策层 → 安排一次高层价值汇报');
+  else tips.push('决策层覆盖不足 → 优先经营教练 / 内线，补齐决策链');
+  if(cis.length)tips.push('已掌握对手 → 用对手弱点准备反击话术，避免陷入价格战');
+  if(!tips.length)tips.push('情报尚薄，建议先补齐 3 条以上外部情报再形成画像');
+  tips.forEach(t=>L.push('   · '+t));
+  L.push('');
+  L.push('（本画像由工作台现有数据自动融合生成；外部情报为人工录入，请核验时效与来源。）');
+  document.getElementById('cpxTitle').textContent='客户画像 · '+c;
+  document.getElementById('cpxBody').textContent=L.join('\n');
+  openMask('mCustPortrait');
+}
+
+/* ================= 组织资产 ================= */
+const ORG_TYPES=['方法论','SOP流程','标杆案例','项目复盘','模板话术','检查清单','行业打法','定价策略'];
+function renderOrgAsset(){
+  const el=document.getElementById('oaBody');if(!el)return;
+  const kw=(document.getElementById('oaSearch')?document.getElementById('oaSearch').value:'').toLowerCase();
+  let list=store.orgassets.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  if(kw)list=list.filter(x=>((x.title||'')+(x.summary||'')+(x.content||'')+(x.tags||'')+(x.scenario||'')+(x.owner||'')).toLowerCase().includes(kw));
+  const byType={};ORG_TYPES.forEach(t=>byType[t]=[]);
+  list.forEach(x=>{const t=ORG_TYPES.includes(x.type)?x.type:'方法论';byType[t].push(x)});
+  const owners=[...new Set(store.orgassets.map(x=>x.owner).filter(Boolean))];
+  let h=`<div class="card"><h3>为什么要有「组织资产」</h3>
+    <div class="hint" style="line-height:1.9">售前专家会流动，但<b>打法不该随人流失</b>。这里沉淀的不是文档，而是「可复制的赢单套路」：方法论（怎么打）、SOP（按什么步骤打）、标杆案例（打成什么样）、项目复盘（哪里打错了）、模板话术（怎么开口）、检查清单（别漏什么）、行业打法与定价策略（在特定战场怎么赢）。<br>目标：<b>新人来了能照着打，老人走了套路还在，组织资产越用越厚。</b></div>
+    <div class="grid g4" style="font-size:13px;margin-top:12px">
+      <div><span style="color:var(--sub)">资产总数</span><br><b>${store.orgassets.length}</b></div>
+      <div><span style="color:var(--sub)">覆盖类型</span><br><b>${ORG_TYPES.filter(t=>byType[t].length).length}/${ORG_TYPES.length}</b></div>
+      <div><span style="color:var(--sub)">贡献者</span><br><b>${owners.length}</b></div>
+      <div><span style="color:var(--sub)">最近更新</span><br><b>${list.length?esc(list[0].date||'—'):'—'}</b></div>
+    </div></div>`;
+  if(!list.length){h+='<div class="card"><div class="empty">暂无组织资产，点击右上角「＋ 沉淀资产」写下第一条打法</div></div>';el.innerHTML=h;return}
+  h+=ORG_TYPES.filter(t=>byType[t].length).map(t=>`<div class="card"><h3>${esc(t)} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${byType[t].length} 条</span></h3>
+    ${byType[t].map(x=>`<div class="kb-item"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <b>${esc(x.title)}</b>
+      ${(x.tags||'').split(',').map(s=>s.trim()).filter(Boolean).map(s=>`<span class="tag">${esc(s)}</span>`).join('')}
+      <div style="flex:1"></div>
+      ${x.version?`<span class="tag">${esc(x.version)}</span>`:''}
+      <span style="font-size:12px;color:var(--sub)">${esc(x.owner||'—')} · ${esc(x.date||'—')}</span>
+      <button class="btn sm ghost" onclick="openOrgAssetModal('${x.id}')">编辑</button>
+      <button class="btn sm danger" onclick="delOrgAsset('${x.id}')">删除</button></div>
+      ${x.summary?`<div class="body" style="font-size:12.5px">${esc(x.summary)}</div>`:''}
+      ${x.scenario?`<div style="margin-top:6px;font-size:12px;color:var(--sub)">适用场景：${esc(x.scenario)}</div>`:''}
+      ${x.content?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12.5px;color:var(--brand)">展开打法要点</summary><div style="white-space:pre-wrap;line-height:1.9;font-size:12.5px;margin-top:8px">${esc(x.content)}</div></details>`:''}
+    </div>`).join('')}
+  </div>`).join('');
+  el.innerHTML=h;
+}
+function openOrgAssetModal(id){
+  const x=id?store.orgassets.find(v=>v.id===id):null;
+  document.getElementById('oaModalTitle').textContent=x?'编辑组织资产':'沉淀组织资产';
+  document.getElementById('oaId').value=x?x.id:'';
+  const tsel=document.getElementById('oaType');
+  tsel.innerHTML=ORG_TYPES.map(t=>`<option>${esc(t)}</option>`).join('');
+  tsel.value=x?x.type:'方法论';
+  const meName=(ME&&(ME.username||ME.name))||'';
+  document.getElementById('oaTitle').value=x?x.title:'';
+  document.getElementById('oaScenario').value=x?(x.scenario||''):'';
+  document.getElementById('oaTags').value=x?(x.tags||''):'';
+  document.getElementById('oaOwner').value=x?(x.owner||meName):meName;
+  document.getElementById('oaVersion').value=x?(x.version||'v1.0'):'v1.0';
+  document.getElementById('oaSummary').value=x?(x.summary||''):'';
+  document.getElementById('oaContent').value=x?(x.content||''):'';
+  openMask('mOrgAsset');
+}
+function saveOrgAsset(){
+  const title=document.getElementById('oaTitle').value.trim();if(!title){toast('请填写标题');return}
+  const id=document.getElementById('oaId').value;
+  const data={id:id||uid(),type:document.getElementById('oaType').value,title,
+    scenario:document.getElementById('oaScenario').value.trim(),tags:document.getElementById('oaTags').value.trim(),
+    owner:document.getElementById('oaOwner').value.trim(),version:document.getElementById('oaVersion').value.trim(),
+    summary:document.getElementById('oaSummary').value.trim(),content:document.getElementById('oaContent').value.trim(),
+    date:today()};
+  if(id){const i=store.orgassets.findIndex(v=>v.id===id);if(i>-1)store.orgassets[i]=Object.assign(store.orgassets[i],data)}
+  else store.orgassets.unshift(data);
+  persist();closeMask('mOrgAsset');renderOrgAsset();toast('已保存');
+}
+function delOrgAsset(id){if(!confirm('确定删除该条组织资产？'))return;store.orgassets=store.orgassets.filter(x=>x.id!==id);persist();renderOrgAsset();toast('已删除')}
+
 /* ================= 项目详情新标签：干系人 / 合同 ================= */
 function renderDtStk(p){
   const list=store.stakeholders[p.id]||[];const c=chainCoverage(p.id);
@@ -2279,7 +2634,7 @@ function seed(){
   if(store.projects.length||store.kb.length){return}
   const C=o=>Object.assign(defaultC139(),o||{});
   const mk=(id,name,customer,stage,oppLevel,sales,presales,amt,mon,c139,extra)=>Object.assign({
-    id,name,customer,stage,oppLevel,sales,presales,
+    id,name,customer,stage,oppLevel,sales,presales,ownerId:(ME&&ME.id)||'anon',
     amounts:{estTotal:amt[0]||0,software:amt[1]||0,won:amt[2]||0,cost:amt[3]||0},
     expectSignMonth:mon[0]||'',actualSignMonth:mon[1]||'',keyDate:mon[2]||'',
     source:'',progressText:'',lostReason:'',created:today(),c139:c139||C(),tasks:[],timeline:[],bg:{},docs:[]},extra||{});
@@ -2415,6 +2770,31 @@ function seed(){
     {id:uid(),title:'一云多芯统一纳管',category:'非功能需求',priority:'high',status:'pending',source:'招标文件',relatedKb:'我司政务云解决方案白皮书',
      description:'支持鲲鹏、海光、飞腾等多种芯片架构的统一管理与调度',analysis:''}
   ]};
+  store.custintel=[
+    {id:uid(),customer:'青海省农村信用社联合社',dim:'工商信息',title:'注册资本与股东结构（示例数据）',date:addDays(today(),-30),source:'公开信息（示例）',
+     projectId:'p1',summary:'省级农信联社，下辖多家农商行，近年在推进信创与灾备合规改造。',
+     insight:'合规驱动型客户，谈监管达标比谈降本更有效。',updated:today()},
+    {id:uid(),customer:'青海省农村信用社联合社',dim:'招投标',title:'灾备系统改造采购意向（示例数据）',date:addDays(today(),-18),source:'招标信息（示例）',
+     projectId:'p1',summary:'拟采购同城双活 + 异地灾备能力，关注 RPO / RTO 是否满足监管口径。',
+     insight:'评分办法中 RPO 实测值与案例现场参观可能是关键分。',updated:today()},
+    {id:uid(),customer:'某市大数据管理局',dim:'招投标',title:'政务云二期招标公告（示例数据）',date:addDays(today(),-25),source:'招标公告（示例）',
+     projectId:'p3',summary:'二期预算约 900 万，要求一云多芯与跨部门数据共享 T+0。',
+     insight:'技术分权重高，控标空间在架构开放性与跨部门共享能力。',updated:today()},
+    {id:uid(),customer:'某市大数据管理局',dim:'舆情动态',title:'领导调研强调算力统筹（示例数据）',date:addDays(today(),-10),source:'公众号（示例）',
+     projectId:'p3',summary:'分管领导公开调研时强调统一算力与数据中枢建设。',
+     insight:'可对齐「统一算力」口径，把方案首图直接映射到领导表述。',updated:today()}
+  ];
+  store.orgassets=[
+    {id:uid(),type:'方法论',title:'金融行业灾备类项目控标五步法（示例）',scenario:'金融行业 / 灾备与双活类项目 / 控单阶段',tags:'灾备,金融,控标',
+     owner:'王强',version:'v1.0',summary:'从监管口径切入，把技术指标写进评分办法，五步锁定胜局。',
+     content:'一、找准监管抓手：先对齐 RPO / RTO 的监管要求，把合规变成刚需\n二、把指标写进评分：推动双活架构成熟度、RPO 实测值进入评分办法\n三、关系覆盖：决策者、审批人、技术负责人、采购四角色逐一覆盖\n四、实地背书：安排已交付现场参观，消除交付风险顾虑\n五、留退路：准备分期建设方案，预算不足时先切一期',date:addDays(today(),-40)},
+    {id:uid(),type:'检查清单',title:'投标前 48 小时自检清单（示例）',scenario:'招投标阶段 / 递交前',tags:'投标,清单,废标',
+     owner:'李峰',version:'v1.0',summary:'八项必查，专治废标与低级失分。',
+     content:'□ 投标函金额与报价一览表一致\n□ 授权书、公章、签字齐全且在有效期\n□ 资格条款逐条响应，无负偏离\n□ 技术偏离表无实质偏离项\n□ 业绩与证书在有效期内\n□ 保证金已按格式缴纳并可查\n□ 电子标已上传成功并留回执\n□ 纸质正副本份数与密封符合要求',date:addDays(today(),-15)},
+    {id:uid(),type:'项目复盘',title:'政务云一期输标复盘：关系壁垒怎么破（示例）',scenario:'政务行业 / 一期已由对手承建 / 二期跟进',tags:'政务云,复盘,关系',
+     owner:'陈晨',version:'v1.0',summary:'一期承建商壁垒高时，靠 TCO 与利用率承诺重构评标口径。',
+     content:'失分点：\n1. 未触达最终审批人，仅停留在使用部门\n2. 对一期利用率投诉未做成量化证据\n3. 报价与对手接近但技术分无差异\n改进动作：\n1. 立项即启动决策链四角色覆盖\n2. 用第三方可验证的利用率数据做对比材料\n3. 把三年维保与运维成本纳入 TCO 口径，拉开商务差异',date:addDays(today(),-8)}
+  ];
   persist();
 }
 
@@ -2428,21 +2808,28 @@ function seed(){
  * 覆盖库之前会把本机全量快照存进 localStorage['presales_workbench_v1_legacy']（每会话一次），防误覆盖。
  * rev 冲突（拉到数据与写回之间同事又改了）→ 提示后强制覆盖，服务器 rev +1。
  */
-var SYNC_COLLECTIONS=['projects','kb','docs','tasks','kbTree','pdocs','checklists','stakeholders','contracts','quotations','compintel','requirements','followups','ui','bidAgentConvs','competitors','salesTraining','toolbox','capability','timesheets'];
-var SYNC_LABEL={projects:'项目',kb:'知识库',docs:'方案文档',tasks:'任务',kbTree:'知识库目录',pdocs:'项目资料',checklists:'检查清单',stakeholders:'干系人',contracts:'合同',quotations:'报价',compintel:'竞争情报',requirements:'需求',followups:'跟进记录',ui:'界面配置'};
+var SYNC_COLLECTIONS=['projects','kb','docs','tasks','kbTree','pdocs','checklists','stakeholders','contracts','quotations','compintel','requirements','custintel','orgassets','followups','ui','bidAgentConvs','competitors','salesTraining','toolbox','capability','timesheets'];
+var SYNC_LABEL={projects:'项目',kb:'知识库',docs:'方案文档',tasks:'任务',kbTree:'知识库目录',pdocs:'项目资料',checklists:'检查清单',stakeholders:'干系人',contracts:'合同',quotations:'报价',compintel:'竞争情报',requirements:'需求',custintel:'客户情报',orgassets:'组织资产',followups:'跟进记录',ui:'界面配置'};
 var SYNC_POLL_MS=60000;
-var _rev={}, _sent={}, _online=false, _lastErr='', _pushTimer=null, _pushing=false, _pushAgain=false, _legacyGuard=false;
-// 浏览器实例标识：无鉴权场景下写进库的 updated_by，出问题时能区分是哪台机器写的
+var _rev={}, _baseline={}, _online=false, _lastErr='', _pushTimer=null, _pushing=false, _pushAgain=false, _legacyGuard=false;
+var lastServerStates=null; // 服务端原始（按服务器 key 命名）states，供管理员「查看全部账号」只读视图使用
+// 浏览器实例标识：写进库的 updated_by，便于区分是哪台机器写的
 var CLIENT_TAG=(function(){try{var v=localStorage.getItem('pw_client');if(!v){v='c'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);localStorage.setItem('pw_client',v)}return v}catch(e){return 'anon'}})();
 
 function _j(v){return JSON.stringify(v===undefined?null:v)}
 function _empty(v){if(v==null)return true;if(Array.isArray(v))return v.length===0;if(typeof v==='object')return Object.keys(v).length===0;return false}
-function _dirtyNow(k){return _sent[k]!==_j(store[k])}
+function _dirtyNow(k){return _baseline[k]!==_j(store[k])}
 function _pendingKeys(){var a=[];for(var i=0;i<SYNC_COLLECTIONS.length;i++){if(_dirtyNow(SYNC_COLLECTIONS[i]))a.push(SYNC_COLLECTIONS[i])}return a}
-function _markSynced(){for(var i=0;i<SYNC_COLLECTIONS.length;i++){var k=SYNC_COLLECTIONS[i];_sent[k]=_j(store[k])}}
+function _markBaseline(){for(var i=0;i<SYNC_COLLECTIONS.length;i++){var k=SYNC_COLLECTIONS[i];_baseline[k]=_j(store[k])}}
 function _guardLegacy(){if(_legacyGuard)return;_legacyGuard=true;try{localStorage.setItem('presales_workbench_v1_legacy',_j({savedAt:new Date().toISOString(),store:store}))}catch(e){}}
 function currentPage(){var el=document.querySelector('.page.on');return el?el.id.slice(2):'dash'}
 function rerender(){try{show(currentPage())}catch(e){}}
+
+/* ---------- 多用户分桶：逻辑集合名 ↔ 服务器 key ---------- */
+function _shardKey(k){ return (ME && ME.role!=='admin') ? (ME.id + '__' + k) : k }        // 普通用户写入自己分桶；管理员写全局（无前缀）
+function _stripShard(sk){ var i=sk.indexOf('__'); return i<0 ? sk : sk.slice(i+2); }       // 服务器 key → 逻辑名
+function _ownerOfServerKey(sk){ var i=sk.indexOf('__'); return i<0 ? 'admin' : sk.slice(0,i); } // 服务器 key → 归属账号
+function _logicalData(states,k){ var sk=_shardKey(k); var row=states&&states[sk]; return row?row.data:null; } // 当前账号「自己」的分片
 
 function schedulePush(){clearTimeout(_pushTimer);_pushTimer=setTimeout(function(){pushChanged()},800);renderSyncState()}
 
@@ -2453,10 +2840,10 @@ async function pushChanged(){
     for(var i=0;i<SYNC_COLLECTIONS.length;i++){
       var k=SYNC_COLLECTIONS[i];
       var payload=_j(store[k]);
-      if(_sent[k]===payload)continue;
+      if(_baseline[k]===payload)continue;
       var ok=await pushOne(k,payload,false);
       // 推送期间内容又变了就不更新快照，下一轮继续推
-      if(ok&&_j(store[k])===payload)_sent[k]=payload;
+      if(ok&&_j(store[k])===payload)_baseline[k]=payload;
     }
   }finally{_pushing=false}
   if(_pushAgain){_pushAgain=false;schedulePush()}
@@ -2464,14 +2851,15 @@ async function pushChanged(){
 }
 
 async function pushOne(k,payload,force){
+  var sk=_shardKey(k);
   var body={data:JSON.parse(payload),by:CLIENT_TAG};
   if(!force&&_rev[k]!=null)body.rev=_rev[k];
   if(force)body.force=true;
   try{
-    var r=await fetch('/api/state/'+encodeURIComponent(k),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    var r=await fetch('/api/state/'+encodeURIComponent(sk),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     if(r.status===409){
       toast('「'+(SYNC_LABEL[k]||k)+'」同事刚改过，已按你这份覆盖');
-      r=await fetch('/api/state/'+encodeURIComponent(k),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({data:JSON.parse(payload),by:CLIENT_TAG,force:true})});
+      r=await fetch('/api/state/'+encodeURIComponent(sk),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({data:JSON.parse(payload),by:CLIENT_TAG,force:true})});
     }
     if(!r.ok){var ej=await r.json().catch(function(){return {}});throw new Error(ej.error||('HTTP '+r.status))}
     var j=await r.json();
@@ -2485,69 +2873,47 @@ async function pushOne(k,payload,force){
   }
 }
 
-/** 拉服务器数据并按规则双向同步；isBoot 时不做「同事改动」提示 */
+/** 拉服务器数据并与本机（自己分桶）双向同步；isBoot 时不做「同事改动」提示 */
 async function pullState(isBoot){
   var r=null;
-  try{r=await fetch(isBoot?'/api/state':'/api/state?meta=1',{cache:'no-store'})}catch(e){_online=false;_lastErr='网络不可达';renderSyncState();return}
+  try{r=await fetch('/api/state',{cache:'no-store'})}catch(e){_online=false;_lastErr='网络不可达';renderSyncState();return}
   if(!r||!r.ok){_online=false;_lastErr='HTTP '+(r?r.status:'?');renderSyncState();return}
   var j=await r.json().catch(function(){return null});
   if(!j||!j.states){_online=false;_lastErr='响应异常';renderSyncState();return}
   _online=true;_lastErr='';
+  lastServerStates=j.states; // 管理员「查看全部账号」只读视图的数据源
   var st=j.states, ups=[], downs=[];
-  if(isBoot){
-    // 全量比对：库里内容缺失/为空而本机非空 → 上传（首次上云）；本机没改过 → 跟随库；本机改过 → 上传
-    for(var i=0;i<SYNC_COLLECTIONS.length;i++){
-      var k=SYNC_COLLECTIONS[i], row=st[k], loc=store[k];
-      if(row)_rev[k]=row.rev;
-      var locJ=_j(loc), srvJ=row?_j(row.data):null;
-      if(row&&locJ===srvJ)continue;                                              // 1 内容一致 → 不动
-      if((!row||_empty(row.data))&&!_empty(loc)){ups.push(k);continue}           // 2 库里空/缺失 → 本机上传
-      if(_sent[k]!==undefined&&locJ===_sent[k]){if(row)downs.push(k);continue}   // 3 本机没改过 → 跟随库
-      if(!_empty(loc)||_sent[k]!==undefined)ups.push(k);                         // 4 本机改过（含主动清空）→ 上传
-      else if(row&&!_empty(row.data))downs.push(k);                              // 5 本机确实空 → 用库
-    }
-    if(downs.length){_guardLegacy();for(var d=0;d<downs.length;d++){var kd=downs[d];store[kd]=st[kd].data;_sent[kd]=_j(store[kd])}}
-    for(var u=0;u<ups.length;u++){var ku=ups[u];var pay=_j(store[ku]);if(await pushOne(ku,pay,true))_sent[ku]=pay}
-  }else{
-    // 轮询：只比 rev。本机有改动 → 带 rev 上传（服务器 rev 更新则 409 → 提示后覆盖）；本机干净但库变了 → 只下载这些集合
-    for(var i2=0;i2<SYNC_COLLECTIONS.length;i2++){
-      var k2=SYNC_COLLECTIONS[i2], row2=st[k2];
-      if(_dirtyNow(k2)){var pay2=_j(store[k2]);if(await pushOne(k2,pay2,false))_sent[k2]=pay2;continue}
-      if(!row2||_sent[k2]===undefined)continue;
-      if(_rev[k2]===undefined||row2.rev!==_rev[k2])downs.push(k2);
-    }
-    if(downs.length)await downloadKeys(downs);
+  for(var i=0;i<SYNC_COLLECTIONS.length;i++){
+    var k=SYNC_COLLECTIONS[i];
+    var srv=_logicalData(st,k);   // 服务端「自己」分片
+    var loc=store[k];
+    var locJ=_j(loc), srvJ=srv!=null?_j(srv):null;
+    if(srvJ!==null&&locJ===srvJ)continue;                        // 1 内容一致 → 不动
+    if(srv==null&&!_empty(loc)){ups.push(k);continue}            // 2 服务端缺失 → 本机上传
+    if(_baseline[k]!==undefined&&locJ===_baseline[k]){if(srv!=null)downs.push(k);continue} // 3 本机没改 → 跟随服务端
+    if(!_empty(loc)||_baseline[k]!==undefined){ups.push(k)}      // 4 本机改过（或已同步过）→ 上传
+    else if(srv!=null){downs.push(k)}                            // 5 本机确实空 → 下载服务端
   }
-  if(downs.length){rerender();if(!isBoot)toast('已同步同事的最新数据')}
+  var changed=false;
+  if(downs.length){_guardLegacy();for(var d=0;d<downs.length;d++){var kd=downs[d];store[kd]=_logicalData(st,kd);_baseline[kd]=_j(store[kd]);changed=true}}
+  for(var u=0;u<ups.length;u++){var ku=ups[u];var pay=_j(store[ku]);if(await pushOne(ku,pay,true)){_baseline[ku]=pay;changed=true}}
+  // 更新自己分片的 rev（按服务器 key）
+  for(var rr=0;rr<SYNC_COLLECTIONS.length;rr++){var kr=SYNC_COLLECTIONS[rr];var skx=_shardKey(kr);if(st[skx])_rev[kr]=st[skx].rev}
+  if(changed){rerender();if(!isBoot)toast('已同步服务器数据')}
   renderSyncState();
-}
-
-/** 精准下载若干集合（轮询用，避免重复拉全量） */
-async function downloadKeys(keys){
-  try{
-    var r=await fetch('/api/state?keys='+encodeURIComponent(keys.join(',')),{cache:'no-store'});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    var j=await r.json();
-    _guardLegacy();
-    for(var i=0;i<keys.length;i++){
-      var k=keys[i], row=j.states&&j.states[k];
-      if(!row)continue;
-      store[k]=row.data;_sent[k]=_j(row.data);_rev[k]=row.rev;
-    }
-  }catch(e){_lastErr=(e&&e.message)||'下载失败';renderSyncState()}
 }
 
 function syncNow(){pullState(false).then(function(){return pushChanged()}).then(function(){toast('已同步')})}
 
-/** 导入备份后整体落库：一次批量强制写入，避免逐集合撞 rev */
+/** 导入备份后整体落库：一次批量强制写入到「自己」分桶，避免逐集合撞 rev */
 async function pushImportToServer(){
   var states={};
-  for(var i=0;i<SYNC_COLLECTIONS.length;i++){var k=SYNC_COLLECTIONS[i];states[k]=store[k]===undefined?null:store[k]}
+  for(var i=0;i<SYNC_COLLECTIONS.length;i++){var k=SYNC_COLLECTIONS[i];states[_shardKey(k)]=store[k]===undefined?null:store[k]}
   try{
     var r=await fetch('/api/state/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({states:states,by:CLIENT_TAG})});
     if(!r.ok)throw new Error('HTTP '+r.status);
     var j=await r.json();
-    for(var w=0;w<(j.written||[]).length;w++){var wk=j.written[w];_rev[wk.key]=wk.rev;_sent[wk.key]=_j(store[wk.key])}
+    for(var w=0;w<(j.written||[]).length;w++){var wk=j.written[w];var lk=_stripShard(wk.key);_rev[lk]=wk.rev;_baseline[lk]=_j(store[lk])}
     _online=true;_lastErr='';toast('导入数据已存入服务器');renderSyncState();
   }catch(e){_online=false;_lastErr=(e&&e.message)||'写入失败';toast('导入数据上传失败（本机已生效）：'+_lastErr+'，可点「立即同步」重试');renderSyncState()}
 }
@@ -2567,8 +2933,9 @@ function renderSyncState(){
 
 /* ================= 启动（由 auth.js 登录成功后调用 bootApp） ================= */
 function bootApp(){
+  ME = window.__ME || null;
   load();seed();renderDash();renderProjects();
-  _markSynced();
+  _markBaseline();
   pullState(true).then(function(){
     setInterval(function(){if(!document.hidden)pullState(false)},SYNC_POLL_MS);
     document.addEventListener('visibilitychange',function(){if(!document.hidden)pullState(false)});
