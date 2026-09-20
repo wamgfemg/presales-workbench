@@ -73,23 +73,10 @@
           <button data-p="capacity"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h3l2-7 3 14 3-9 2 4h5"/></svg></span>产能看板</button>
           <button data-p="customer360"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2"/><path d="M5 21a7 7 0 0 1 14 0M12 11a3 3 0 0 0 3 3h1.5a2.5 2.5 0 0 1 2 4"/></svg></span>客户360</button>
           <button data-p="minutes"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>会议纪要</button>
+          <button data-p="settings"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>系统与数据</button>
         </div>
       </div>
-      <button data-p="users" style="display:none"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 2.6V11c0 4.4-2.9 7.4-7 8.9-4.1-1.5-7-4.5-7-8.9V5.6z"/><path d="M9.5 11.5l1.8 1.8 3.5-3.6"/></svg></span>用户管理</button>
     </nav>
-    <div class="side-foot">
-      <div class="side-user" id="sideUser" style="display:none">
-        <div class="su-name">👤 <span id="curUser"></span></div>
-        <div class="su-warn" id="pwWarn" style="display:none">⚠ 当前为初始密码，建议尽快修改</div>
-        <div class="su-btns"><button id="btnPw" class="su-btn" style="display:none" onclick="openPw()"><svg viewBox="0 0 24 24" class="su-ic"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10 13l8-8M15 5l3 3M13 7l2 2"/></svg>修改密码</button><button id="btnLogout" class="su-btn out" style="display:none" onclick="doLogout()"><svg viewBox="0 0 24 24" class="su-ic"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>退出</button></div>
-      </div>
-      数据存服务器 <span id="syncState" title="业务数据已落库 SQLite；本机浏览器另留一份缓存">●</span>
-      <button onclick="exportAll()">⬇ 导出数据备份</button>
-      <button onclick="document.getElementById('importFile').click()">⬆ 导入数据</button>
-      <button onclick="syncNow()">⟳ 立即同步</button>
-      <button onclick="resetDemo()">↺ 重置演示数据</button>
-      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importAll(this)">
-    </div>
   </aside>
 
   <main class="main">
@@ -327,6 +314,38 @@
       <datalist id="dlProduct"></datalist>
     </section>
 
+    <!-- ============ 系统与数据 ============ -->
+    <section class="page" id="p-settings">
+      <div class="page-head"><div><h2>系统与数据</h2><div class="desc">账号安全、数据备份与同步、用户权限的统一管理入口</div></div></div>
+      <div class="set-grid">
+        <div class="card set-card">
+          <h3>👤 账号安全</h3>
+          <div class="side-user" id="sideUser" style="display:none;border-bottom:0;padding-bottom:0">
+            <div class="su-name">当前用户：<b id="curUser"></b></div>
+            <div class="su-warn" id="pwWarn" style="display:none">⚠ 当前为初始密码，建议尽快修改</div>
+            <div class="su-btns"><button id="btnPw" class="su-btn" style="display:none" onclick="openPw()"><svg viewBox="0 0 24 24" class="su-ic"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10 13l8-8M15 5l3 3M13 7l2 2"/></svg>修改密码</button><button id="btnLogout" class="su-btn out" style="display:none" onclick="doLogout()"><svg viewBox="0 0 24 24" class="su-ic"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>退出登录</button></div>
+          </div>
+          <p class="set-note">修改密码后需重新登录；「退出登录」将结束当前会话。</p>
+        </div>
+        <div class="card set-card">
+          <h3>🗄️ 数据管理</h3>
+          <div class="set-sync">数据存服务器 <span id="syncState" title="业务数据已落库 SQLite；本机浏览器另留一份缓存">●</span></div>
+          <div class="su-btns" style="flex-wrap:wrap">
+            <button class="su-btn" onclick="syncNow()">⟳ 立即同步</button>
+            <button class="su-btn" onclick="exportAll()">⬇ 导出数据备份</button>
+            <button class="su-btn" onclick="document.getElementById('importFile').click()">⬆ 导入数据</button>
+            <button class="su-btn out" onclick="resetDemo()">↺ 重置演示数据</button>
+          </div>
+          <p class="set-note">导出为全量 JSON 备份；导入将覆盖当前工作数据；重置演示数据会清空并回填示例数据（不可恢复，建议先导出备份）。</p>
+          <input type="file" id="importFile" accept=".json" style="display:none" onchange="importAll(this)">
+        </div>
+        <div class="card set-card" id="setUsersCard" style="display:none">
+          <h3>🛡️ 用户与权限</h3>
+          <p class="set-note">管理系统账号、角色与各模块访问权限（仅管理员可见）。</p>
+          <button class="su-btn" onclick="show('users')">进入用户管理 →</button>
+        </div>
+      </div>
+    </section>
     <!-- ============ 用户管理 ============ -->
     <section class="page" id="p-users">
       <div class="page-head"><div><h2>用户管理</h2><div class="desc">管理系统账号、角色与各模块访问权限（仅管理员可见）</div></div></div>

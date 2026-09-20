@@ -126,6 +126,7 @@ function show(p){
   if(p==='compintel')renderCompintel();
   if(p==='requirements')renderRequirements();
   if(p==='users'&&window.renderUsers)renderUsers();
+  if(p==='settings')renderSettings();
   if(p==='market'&&window.renderMarket)renderMarket();
   if(p==='marketdaily'&&window.renderMarketDaily)renderMarketDaily();
   if(p==='aidaily'&&window.renderAidaily)renderAidaily();
@@ -2661,3 +2662,6 @@ function exportMinutesWord(m){
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=(m.title||'会议纪要')+'.doc'; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }
+
+/* ================= 系统与数据（设置中心） ================= */
+function renderSettings(){try{renderSyncState()}catch(e){}}
