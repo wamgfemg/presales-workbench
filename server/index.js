@@ -651,12 +651,19 @@ try {
   log('!! SQLite 初始化失败（/api/state 返回 503，前端自动退回浏览器本地模式）:', e && e.message)
 }
 
+// 多用户数据隔离：admin 使用无前缀集合（全量，向后兼容现有单用户数据）；普通 user 使用 u_<id>__<collection> 分桶
+function stateOwnerPrefix(user) {
+  if (!user || user.role === 'admin') return ''
+  return String(user.id) + '__'
+}
+
 function dbUnavailable(res) {
   return sendJson(res, 503, { error: '数据库不可用', detail: 'SQLite 未就绪，前端将退回浏览器本地模式' })
 }
 
 async function handleStateList(req, res, sp) {
   if (!_dbReady) return dbUnavailable(res)
+  const prefix = stateOwnerPrefix(req.__user)
   const metaOnly = !!(sp && sp.get('meta'))
   const keysParam = sp ? sp.get('keys') : null
   let states
@@ -665,16 +672,19 @@ async function handleStateList(req, res, sp) {
     for (const raw of String(keysParam).split(',')) {
       const k = raw.trim()
       if (!k) continue
+      if (prefix && !k.startsWith(prefix)) continue
       try { const row = DB.get(k, !metaOnly); if (row) states[k] = row } catch (_) {}
     }
   } else {
-    states = DB.listAll(!metaOnly)
+    states = prefix ? DB.listByPrefix(prefix, !metaOnly) : DB.listAll(!metaOnly)
   }
   return sendJson(res, 200, { ok: true, states, meta: metaOnly, db: DB.info() })
 }
 
 async function handleStateGet(req, res, key) {
   if (!_dbReady) return dbUnavailable(res)
+  const prefix = stateOwnerPrefix(req.__user)
+  if (prefix && !key.startsWith(prefix)) return sendJson(res, 403, { error: '无权访问该数据分片', key })
   let row
   try { row = DB.get(key) } catch (e) { return sendJson(res, 400, { error: e.message }) }
   if (!row) return sendJson(res, 404, { error: '集合不存在', key })
@@ -683,6 +693,8 @@ async function handleStateGet(req, res, key) {
 
 async function handleStatePut(req, res, key) {
   if (!_dbReady) return dbUnavailable(res)
+  const prefix = stateOwnerPrefix(req.__user)
+  if (prefix && !key.startsWith(prefix)) return sendJson(res, 403, { error: '无权写入该数据分片', key })
   let body
   try { body = await readBody(req, MAX_STATE_BODY) } catch (e) { return sendJson(res, 400, { error: e.message }) }
   if (body.data === undefined) return sendJson(res, 400, { error: 'data 必填' })
@@ -702,13 +714,21 @@ async function handleStateImport(req, res) {
   try { body = await readBody(req, MAX_STATE_BODY) } catch (e) { return sendJson(res, 400, { error: e.message }) }
   const states = body.states
   if (!states || typeof states !== 'object' || Array.isArray(states)) return sendJson(res, 400, { error: 'states 必须是对象' })
-  const out = DB.putMany(states, { by: body.by, force: true })
+  const prefix = stateOwnerPrefix(req.__user)
+  let target = states
+  if (prefix) {
+    target = {}
+    for (const k of Object.keys(states)) { if (k.startsWith(prefix)) target[k] = states[k] }
+  }
+  const out = DB.putMany(target, { by: body.by, force: true })
   log(`state 批量写入 ${out.written.length} 个集合${out.conflicts.length ? '，跳过冲突 ' + out.conflicts.length + ' 个' : ''}`)
   return sendJson(res, 200, { ok: true, ...out, db: DB.info() })
 }
 
 async function handleStateDelete(req, res, key) {
   if (!_dbReady) return dbUnavailable(res)
+  const prefix = stateOwnerPrefix(req.__user)
+  if (prefix && !key.startsWith(prefix)) return sendJson(res, 403, { error: '无权删除该数据分片', key })
   try { return sendJson(res, 200, { ok: true, ...DB.remove(key) }) }
   catch (e) { return sendJson(res, 400, { error: e.message }) }
 }
@@ -961,8 +981,10 @@ const server = http.createServer(async (req, res) => {
           return void (await auth.handleUsers(req, res, user, ap))
         }
         if (ap === '/api/password' && req.method === 'POST') return void (await auth.handleChangePassword(req, res, user))
-        const az = auth.authorize(user, ap, req.method)
-        if (!az.ok) return sendJson(res, 403, { error: az.error })
+        if (!ap.startsWith('/api/state')) {
+          const az = auth.authorize(user, ap, req.method)
+          if (!az.ok) return sendJson(res, 403, { error: az.error })
+        }
         req.__user = user
       }
     }

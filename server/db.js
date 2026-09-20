@@ -54,6 +54,7 @@ function init(dbFile) {
   _db.exec('CREATE INDEX IF NOT EXISTS files_scope_idx ON files(scope, created_at)')
   _s = {
     all: _db.prepare('SELECT key, data, rev, size, updated_at, updated_by FROM state ORDER BY key'),
+    allByPrefix: _db.prepare('SELECT key, data, rev, size, updated_at, updated_by FROM state WHERE key LIKE ? ORDER BY key'),
     one: _db.prepare('SELECT key, data, rev, size, updated_at, updated_by FROM state WHERE key = ?'),
     ins: _db.prepare('INSERT INTO state(key, data, rev, size, updated_at, updated_by) VALUES(?, ?, 1, ?, ?, ?)'),
     upd: _db.prepare('UPDATE state SET data=?, rev=rev+1, size=?, updated_at=?, updated_by=? WHERE key=?'),
@@ -87,6 +88,14 @@ function rowOut(r, withData = true) {
 function listAll(withData = true) {
   const out = {}
   for (const r of _s.all.all()) out[r.key] = rowOut(r, withData)
+  return out
+}
+/** 按 key 前缀列出集合（多用户隔离：u_<id>__ 前缀 = 某用户分桶）；prefix 为空退化为全量 */
+function listByPrefix(prefix, withData = true) {
+  const p = String(prefix || '')
+  if (!p) return listAll(withData)
+  const out = {}
+  for (const r of _s.allByPrefix.iterate(p + '%')) out[r.key] = rowOut(r, withData)
   return out
 }
 
@@ -212,4 +221,4 @@ function delFile(id) {
   return { ok: true, fileId: String(id || ''), deleted: Number(r.changes || 0) > 0 }
 }
 
-module.exports = { init, listAll, get, put, putMany, remove, info, assertKey, putFile, getFile, fileMeta, listFiles, delFile }
+module.exports = { init, listAll, listByPrefix, get, put, putMany, remove, info, assertKey, putFile, getFile, fileMeta, listFiles, delFile }
