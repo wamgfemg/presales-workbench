@@ -2115,6 +2115,141 @@ async function uploadQuotationExcel(inp,qid){
 function delQuotation(id){if(!confirm('确定删除该报价？'))return;const pid=document.getElementById('qtProj').value;store.quotations[pid]=(store.quotations[pid]||[]).filter(x=>x.id!==id);persist();renderQuotations();toast('已删除')}
 
 /* ================= 竞争情报 ================= */
+/* ---- 投标评分竞争分析（参照《机房综合监控服务（DCIM）项目投标评分及竞争格局分析报告》五段结构） ---- */
+var CI_SCORE_TEMPLATE=[
+  {cat:'商务评审（13分）',group:'公司实力',item:'公司资质',pts:2,type:'客观分'},
+  {cat:'商务评审（13分）',group:'公司实力',item:'技术实力',pts:3,type:'客观分'},
+  {cat:'商务评审（13分）',group:'公司实力',item:'实施案例',pts:8,type:'客观分'},
+  {cat:'技术评审（49分）',group:'实施方案',item:'关键技术方案',pts:8,type:'主观分'},
+  {cat:'技术评审（49分）',group:'实施方案',item:'全链路实施方案',pts:8,type:'主观分'},
+  {cat:'技术评审（49分）',group:'实施团队',item:'项目经理',pts:2,type:'客观分'},
+  {cat:'技术评审（49分）',group:'实施团队',item:'技术经理',pts:2,type:'客观分'},
+  {cat:'技术评审（49分）',group:'POC测试',item:'POC测试成果',pts:20,type:'客观分'},
+  {cat:'技术评审（49分）',group:'维保服务',item:'服务年限',pts:6,type:'客观分'},
+  {cat:'技术评审（49分）',group:'维保服务',item:'服务价格占比',pts:3,type:'客观分'},
+  {cat:'价格评审（38分）',group:'价格',item:'投标报价',pts:38,type:'客观分'}
+];
+var CI_TIERS=[{v:1,name:'第一梯队',pos:'中标核心热门'},{v:2,name:'第二梯队',pos:'最大逆袭潜力'},{v:3,name:'第三梯队',pos:'稳中无优势'},{v:4,name:'第四梯队',pos:'高废标风险'}];
+var CI_POC_TABLE=[['60分','0分'],['70分','5分'],['80分','10分'],['90分','15分'],['100分','20分']];
+function ciBattleOf(pid){
+  store.ui=store.ui||{};store.ui.ciBattle=store.ui.ciBattle||{};
+  let b=store.ui.ciBattle[pid];
+  if(!b){
+    const rivals=(store.compintel||[]).filter(x=>x.projectId===pid).map(x=>x.competitor).filter(Boolean);
+    const names=[...new Set(rivals)];
+    b={items:JSON.parse(JSON.stringify(CI_SCORE_TEMPLATE)).map(x=>(x.id=uid(),x)),
+       vendors:[{id:uid(),name:'我方',mine:true,tier:1,scores:{},totalEst:'',basis:'',risks:'',strategy:'',strengths:'',weaknesses:''}]
+         .concat(names.map(n=>({id:uid(),name:n,tier:2,scores:{},totalEst:'',basis:'',risks:'',strategy:'',strengths:'',weaknesses:''}))),
+       updatedAt:Date.now()};
+    store.ui.ciBattle[pid]=b;
+  }
+  return b;
+}
+function ciBsave(pid){const b=(store.ui.ciBattle||{})[pid];if(b)b.updatedAt=Date.now();persist()}
+function ciBparse(v){
+  if(v===undefined||v===null)return null;const s=String(v).trim();if(!s)return null;
+  const m=s.match(/^(\d+(?:\.\d+)?)\s*[~～－-]\s*(\d+(?:\.\d+)?)$/);
+  if(m)return[parseFloat(m[1]),parseFloat(m[2])];
+  const n=parseFloat(s);return isNaN(n)?null:[n,n];
+}
+function ciBfmt(lo,hi){const f=x=>String(Math.round(x*10)/10);return lo===hi?f(lo):f(lo)+'~'+f(hi)}
+function ciBsum(b,vid,onlyObj){
+  let lo=0,hi=0,any=false;
+  const v=b.vendors.find(x=>x.id===vid);if(!v)return'—';
+  b.items.forEach(it=>{
+    if(onlyObj&&String(it.type||'').indexOf('客观')<0)return;
+    const r=ciBparse((v.scores||{})[it.id]);if(!r)return;
+    lo+=r[0];hi+=r[1];any=true;
+  });
+  return any?ciBfmt(lo,hi):'—';
+}
+function ciBcellCls(v,pts){
+  const r=ciBparse(v);if(!r||!pts)return r?'mid':'zero';
+  if(r[0]===r[1]){const ratio=r[0]/pts;if(ratio>=0.9)return'ok';if(ratio<0.5)return'bad';return'mid'}
+  return'mid';
+}
+function ciBceb(pid,vid,field,txt){
+  return '<div class="cib-field" contenteditable="plaintext-only" onblur="ciB_field(\''+pid+'\',\''+vid+'\',\''+field+'\',this)">'+esc(txt||'')+'</div>';
+}
+function ciB_std(pid,idx,field,el){const b=ciBattleOf(pid);const it=b.items[idx];if(!it)return;it[field]=el.textContent.trim();if(field==='pts'){const n=parseFloat(it[field]);it.pts=isNaN(n)?0:n}ciBsave(pid)}
+function ciB_stdAdd(pid){const b=ciBattleOf(pid);const last=b.items[b.items.length-1]||{};b.items.push({id:uid(),cat:last.cat||'',group:last.group||'',item:'新细项',pts:1,type:'客观分'});ciBsave(pid);renderCompintel()}
+function ciB_stdDel(pid,idx){const b=ciBattleOf(pid);b.items.splice(idx,1);ciBsave(pid);renderCompintel()}
+function ciB_cell(pid,vid,iid,el){const b=ciBattleOf(pid);const v=b.vendors.find(x=>x.id===vid);if(!v)return;v.scores=v.scores||{};v.scores[iid]=el.textContent.trim();ciBsave(pid);ciB_recalc(pid)}
+function ciB_recalc(pid){
+  const b=ciBattleOf(pid);
+  const s=document.getElementById('cibsum-'+pid),t=document.getElementById('cibtot-'+pid);
+  const sumRow=(onlyObj,label)=>'<th style="text-align:left">'+label+'</th>'+b.vendors.map(v=>'<td class="sum">'+ciBsum(b,v.id,onlyObj)+'</td>').join('')+'<td></td>';
+  if(s)s.innerHTML=sumRow(true,'客观分小计（不含POC/价格）');
+  if(t)t.innerHTML=sumRow(false,'合计（含已填主观/价格）');
+  document.querySelectorAll('[data-cibobj]').forEach(el=>{const v=b.vendors.find(x=>x.id===el.getAttribute('data-cibobj'));if(v)el.textContent=ciBsum(b,v.id,true)});
+}
+function ciB_vendorAdd(pid,mine){
+  const b=ciBattleOf(pid);
+  let name;
+  if(mine){if(b.vendors.some(v=>v.mine)){toast('已有我方列');return}name='我方'}
+  else{
+    const sug=(store.compintel||[]).filter(x=>x.projectId===pid).map(x=>x.competitor).filter(n=>n&&!b.vendors.some(v=>v.name===n));
+    name=prompt('对手名称：',sug[0]||'');if(!name)return;
+    if(b.vendors.some(v=>v.name===name)){toast('该厂商已存在');return}
+  }
+  b.vendors.push({id:uid(),name,mine:!!mine,tier:mine?1:2,scores:{},totalEst:'',basis:'',risks:'',strategy:'',strengths:'',weaknesses:''});
+  ciBsave(pid);renderCompintel();
+}
+function ciB_vendorDel(pid,vid){const b=ciBattleOf(pid);b.vendors=b.vendors.filter(v=>v.id!==vid);ciBsave(pid);renderCompintel()}
+function ciB_field(pid,vid,field,el){const b=ciBattleOf(pid);const v=b.vendors.find(x=>x.id===vid);if(!v)return;v[field]=el.textContent.trim();ciBsave(pid)}
+function ciB_tier(pid,vid,val){const b=ciBattleOf(pid);const v=b.vendors.find(x=>x.id===vid);if(!v)return;v.tier=parseInt(val,10)||1;ciBsave(pid);renderCompintel()}
+function renderCiBattle(pid){
+  const b=ciBattleOf(pid);
+  const vendors=b.vendors;
+  /* ① 评分标准总览 */
+  const stdRows=b.items.map((it,i)=>'<tr>'
+    +'<td contenteditable="plaintext-only" onblur="ciB_std(\''+pid+'\','+i+',\'cat\',this)">'+esc(it.cat)+'</td>'
+    +'<td contenteditable="plaintext-only" onblur="ciB_std(\''+pid+'\','+i+',\'group\',this)">'+esc(it.group)+'</td>'
+    +'<td contenteditable="plaintext-only" onblur="ciB_std(\''+pid+'\','+i+',\'item\',this)">'+esc(it.item)+'</td>'
+    +'<td style="text-align:center" contenteditable="plaintext-only" onblur="ciB_std(\''+pid+'\','+i+',\'pts\',this)">'+esc(it.pts)+'</td>'
+    +'<td contenteditable="plaintext-only" onblur="ciB_std(\''+pid+'\','+i+',\'type\',this)">'+esc(it.type)+'</td>'
+    +'<td><button class="btn sm danger" onclick="ciB_stdDel(\''+pid+'\','+i+')">删</button></td></tr>').join('');
+  /* ② 全厂商得分矩阵 */
+  const mtxRows=b.items.map(it=>'<tr><th style="text-align:left">'+esc(it.item)+'（'+esc(it.pts)+'·'+esc(it.type)+'）</th>'
+    +vendors.map(v=>{const val=(v.scores||{})[it.id]||'';return '<td class="'+ciBcellCls(val,it.pts)+'" contenteditable="plaintext-only" onblur="ciB_cell(\''+pid+'\',\''+v.id+'\',\''+it.id+'\',this)">'+esc(val)+'</td>'}).join('')
+    +'<td></td></tr>').join('');
+  const sumRows='<tr id="cibsum-'+pid+'"></tr><tr id="cibtot-'+pid+'"></tr>';
+  /* ③ 核心分差逐项分析 */
+  const tierSel=v=>'<select onchange="ciB_tier(\''+pid+'\',\''+v.id+'\',this.value)" style="font-size:11px;padding:2px 6px">'
+    +CI_TIERS.map(t=>'<option value="'+t.v+'"'+((v.tier||1)===t.v?' selected':'')+'>'+t.name+' · '+t.pos+'</option>').join('')+'</select>';
+  const profs=vendors.map(v=>'<div class="kb-item">'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b>'+esc(v.name)+'</b>'
+    +'<span class="tag">客观分小计 <b data-cibobj="'+v.id+'">'+ciBsum(b,v.id,true)+'</b></span>'
+    +'<div style="flex:1"></div>'+tierSel(v)
+    +(v.mine?'':'<button class="btn sm danger" onclick="ciB_vendorDel(\''+pid+'\',\''+v.id+'\')">删除</button>')+'</div>'
+    +'<div class="grid g2" style="margin-top:10px;font-size:12px">'
+    +'<div><span style="color:var(--sub)">预估总分（含主观/价格变量）</span>'+ciBceb(pid,v.id,'totalEst',v.totalEst)+'</div>'
+    +'<div><span style="color:var(--sub)">得分依据</span>'+ciBceb(pid,v.id,'basis',v.basis)+'</div>'
+    +'<div><span style="color:var(--sub)">潜在风险</span>'+ciBceb(pid,v.id,'risks',v.risks)+'</div>'
+    +'<div><span style="color:var(--sub)">投标策略</span>'+ciBceb(pid,v.id,'strategy',v.strategy)+'</div>'
+    +'</div></div>').join('');
+  /* ④ 梯队格局 */
+  const tierCols=CI_TIERS.map(t=>'<div class="tier-card t'+t.v+'"><b>'+t.name+'</b><span class="tag" style="margin-left:6px">'+t.pos+'</span>'
+    +(vendors.filter(v=>(v.tier||1)===t.v).length?vendors.filter(v=>(v.tier||1)===t.v).map(v=>'<div style="margin-top:8px;font-size:12px"><b>'+esc(v.name)+'</b>'
+      +'<div style="color:var(--sub);margin-top:4px">核心优势</div>'+ciBceb(pid,v.id,'strengths',v.strengths)
+      +'<div style="color:var(--sub);margin-top:4px">核心短板</div>'+ciBceb(pid,v.id,'weaknesses',v.weaknesses)
+      +'</div>').join(''):'<div class="empty">无厂商</div>')+'</div>').join('');
+  const pocDetails='<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:var(--sub)">POC 测试折算参考（原始分 → 折算分，POC 满分 20）</summary>'
+    +'<table style="margin-top:8px;width:auto"><tr><th>POC 原始得分</th><th>折算后分值</th></tr>'
+    +CI_POC_TABLE.map(r=>'<tr><td>'+r[0]+'</td><td>'+r[1]+'</td></tr>').join('')+'</table>'
+    +'<div class="hint" style="margin-top:8px">POC 测试为客观计分项、权重极高，是弱势厂商核心逆袭突破口：可视化/交互体验强的厂商主攻演示效果，稳定性和功能完备性强的厂商主攻压力测试与功能覆盖。</div></details>';
+  return '<div class="card" style="margin-top:12px">'
+    +'<h3>投标评分竞争分析 <span class="tag">评分标准 · 得分矩阵 · 分差分析 · 梯队格局 · 投标策略</span></h3>'
+    +'<div class="hint">所有表格单元格与文本块均可直接点击编辑，失焦即自动保存到服务器。主观技术方案、POC 测试、投标报价为核心变量分值，是得分推演与策略博弈的主战场。</div>'
+    +'<h3 style="font-size:13px">① 评分标准总览 <button class="btn sm ghost" onclick="ciB_stdAdd(\''+pid+'\')">＋添加细项</button></h3>'
+    +'<div style="overflow-x:auto"><table class="cib-std"><tr><th>评审类别</th><th>评分大类</th><th>评分细项</th><th>分值</th><th>评分性质</th><th></th></tr>'+stdRows+'</table></div>'
+    +'<h3 style="font-size:13px;margin-top:16px">② 全厂商预估得分汇总 <button class="btn sm ghost" onclick="ciB_vendorAdd(\''+pid+'\',false)">＋对手</button><button class="btn sm ghost" style="margin-left:6px" onclick="ciB_vendorAdd(\''+pid+'\',true)">＋我方</button></h3>'
+    +'<div style="overflow-x:auto"><table class="mtx cib-mtx"><tr><th style="text-align:left">评分细项（满分·性质）</th>'+vendors.map(v=>'<th>'+esc(v.name)+(v.mine?' ⭐':'')+'</th>').join('')+'<th></th></tr>'+mtxRows+sumRows+'</table></div>'
+    +pocDetails
+    +'<h3 style="font-size:13px;margin-top:16px">③ 核心分差逐项分析（得分依据与潜在风险）</h3>'+profs
+    +'<h3 style="font-size:13px;margin-top:16px">④ 整体竞争格局梯队判定</h3><div class="grid g4">'+tierCols+'</div>'
+    +'</div>';
+}
 function renderCompintel(){
   ciCtxProject=null;
   const el=document.getElementById('ciBody');
@@ -2156,7 +2291,9 @@ function renderCompintel(){
         <div style="font-size:12px;color:var(--sub)">${arr.length} 条情报 · 最近 ${esc(last.date||'—')}</div>
         <div style="font-size:12px;margin-top:4px">${last.price?'对手报价 <b>'+fmtWan(last.price)+'</b> 万':'价格未知'}</div></div>`}).join('')+'</div>':'<div class="empty">暂无情报</div>'}</div>`;
   }
-  if(!list.length){el.innerHTML=head+'<div class="card"><div class="empty">暂无匹配的竞争情报，点击右上角新增</div></div>';return}
+  if(pf)head+=renderCiBattle(pf);
+  else{const n=Object.keys((store.ui&&store.ui.ciBattle)||{}).length;if(n)head+='<div class="hint">已建立 '+n+' 个项目的「投标评分竞争分析」，选择上方项目即可查看评分矩阵与梯队格局。</div>'}
+  if(!list.length&&!head){el.innerHTML='<div class="card"><div class="empty">暂无匹配的竞争情报，点击右上角新增</div></div>';return}
   el.innerHTML=head+'<div class="card">'+list.map(ci=>{
     const pr=ci.projectId?getProj(ci.projectId):null;
     return `<div class="kb-item"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -2175,6 +2312,7 @@ function renderCompintel(){
         ${ci.weaknesses?`<div style="flex:1;background:#fde8ef;border-radius:8px;padding:10px"><b style="color:var(--ok)">对手弱点</b><br>${esc(ci.weaknesses)}</div>`:''}
       </div>`:''}
     </div>`}).join('')+'</div>';
+  if(pf)ciB_recalc(pf);
 }
 function openCiModal(id){
   const ci=id?store.compintel.find(x=>x.id===id):null;

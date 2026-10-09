@@ -583,3 +583,15 @@ body.auth-pending #app{display:none!important}
 .set-sync{font-size:12.5px;color:#c8d0e8;padding:9px 12px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:rgba(255,255,255,.04)}
 .set-note{font-size:11px;color:#8b95b8;margin:12px 0 0;line-height:1.7}
 .set-card .su-btn{flex:1 1 42%}
+
+/* ---- 竞争情报 · 投标评分竞争分析 ---- */
+.cib-std td[contenteditable],.cib-mtx td[contenteditable],.cib-field[contenteditable]{cursor:text}
+.cib-std td[contenteditable]:focus,.cib-mtx td[contenteditable]:focus,.cib-field[contenteditable]:focus{outline:2px solid var(--brand);outline-offset:-2px;background:#fff}
+.cib-field{min-height:36px;background:#f8fafd;border-radius:8px;padding:8px 10px;margin-top:4px;font-size:12px;line-height:1.6;white-space:pre-wrap}
+.cib-mtx td{min-width:88px}
+.tier-card{background:#fff;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:10px;padding:12px 14px;font-size:12px}
+.tier-card.t1{border-left-color:var(--ok)}
+.tier-card.t2{border-left-color:#1c5ed8}
+.tier-card.t3{border-left-color:#b25e00}
+.tier-card.t4{border-left-color:var(--bad)}
+.tier-card .cib-field{margin-top:2px}
