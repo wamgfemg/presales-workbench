@@ -147,11 +147,14 @@ function show(p){
   if(p==='minutes')renderMinutes();
   if(p==='promptcheck')pcMount();
 }
-/* 提示词体检器：首次进入才挂载 iframe，避免首屏多加载一个页面 */
+/* 提示词体检器：首次进入才挂载 iframe，避免首屏多加载一个页面。
+   页面经 nginx /pc/ 反代后为同源，可先写 localStorage 让它以浅色主题渲染。 */
+const PC_STANDALONE='https://vafrcvxs.qwenwork.host/';
 function pcMount(){
   const f=document.getElementById('pcFrame');if(!f)return;
   if(!f.getAttribute('src')||f.getAttribute('src')==='about:blank'){
-    f.setAttribute('src',f.dataset.src||'./tools/prompt-checkup.html?theme=light');
+    try{if(!localStorage.getItem('pc-theme'))localStorage.setItem('pc-theme','light')}catch(e){}
+    f.setAttribute('src',f.dataset.src||'/pc/');
   }
 }
 function pcReload(){
@@ -159,7 +162,7 @@ function pcReload(){
   const s=f.getAttribute('src');if(!s||s==='about:blank'){pcMount();return}
   f.setAttribute('src',s);toast('已重新加载');
 }
-function pcOpenStandalone(){window.open('./tools/prompt-checkup.html','_blank')}
+function pcOpenStandalone(){window.open(PC_STANDALONE,'_blank')}
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-p]');if(b)show(b.dataset.p)});
 document.getElementById('nav').addEventListener('click',e=>{const t=e.target.closest('.nav-group-title');if(t){const g=t.closest('.nav-group');if(g)g.classList.toggle('collapsed');}});
 function closeMask(id){document.getElementById(id).classList.remove('on')}
