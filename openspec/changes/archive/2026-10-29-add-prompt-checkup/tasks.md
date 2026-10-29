@@ -17,6 +17,6 @@
 
 ## 4. 验证与交付
 - [x] 4.1 main.js 语法检查通过
-- [ ] 4.2 部署至 /opt/presales-workbench/frontend，md5 与本地一致
-- [ ] 4.3 curl 验证 /tools/prompt-checkup.html 与首页均 200，线上命中新菜单
-- [ ] 4.4 openspec/ 与前端改动推送 GitHub
+- [x] 4.2 部署至 /opt/presales-workbench/frontend，md5 与本地一致（index.html/main.js/styles.css/tools 四项全 PASS）
+- [x] 4.3 curl 验证 /tools/prompt-checkup.html 与首页均 200，线上命中新菜单
+- [x] 4.4 openspec/ 与前端改动推送 GitHub（5ce99fa..c7968d9 → main）
