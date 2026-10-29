@@ -17,18 +17,22 @@
 
 #### Scenario: 首次进入才加载
 - **WHEN** 用户首次点击「提示词体检器」菜单
-- **THEN** `pcMount()` 将 `data-src`（./tools/prompt-checkup.html?theme=light）赋给 iframe 的 src 并加载
+- **THEN** `pcMount()` 将 `data-src`（/pc/）赋给 iframe 的 src 并加载
 
 #### Scenario: 二次进入不重复加载
 - **WHEN** 用户切走后再切回该页面
 - **THEN** iframe 已带 src，不再重新赋值，也不重新加载页面
 
 ### Requirement: 浅色主题嵌入
-系统 SHALL 以 URL 参数 `theme=light` 加载体检器，使其默认呈现浅色主题，与工作台视觉一致。
+系统 SHALL 使托管版以浅色主题渲染：挂载 iframe 前，仅当用户未手动设置过主题时，向同源 localStorage 写入 `pc-theme=light`（托管版不支持 `?theme=` URL 参数，仅读该 localStorage 键）。
 
 #### Scenario: 嵌入态主题为浅色
-- **WHEN** iframe 以 `?theme=light` 加载且用户此前未手动切换过主题
-- **THEN** 体检器以浅色主题渲染
+- **WHEN** localStorage 中无 `pc-theme` 且用户首次进入该页
+- **THEN** 写入 `pc-theme=light` 后再加载 iframe，页面以浅色主题渲染
+
+#### Scenario: 尊重用户已选主题
+- **WHEN** 用户此前在页内切换过主题（localStorage 已有 `pc-theme`）
+- **THEN** 不覆盖该值，页面按用户选择渲染
 
 ### Requirement: 重新加载与独立打开
 系统 SHALL 在页头提供「↻ 重新加载」与「⧉ 独立窗口打开」两个操作。
@@ -39,11 +43,22 @@
 
 #### Scenario: 独立窗口打开
 - **WHEN** 用户点击「⧉ 独立窗口打开」
-- **THEN** 在新标签页打开 ./tools/prompt-checkup.html
+- **THEN** 在新标签页打开 `https://vafrcvxs.qwenwork.host/`（线上原址，而非反代路径）
 
 ### Requirement: 体检器能力保持完整
-系统 SHALL 以 iframe 原样承载体检器的全部能力：粘贴提示词、10 维度体检打分、命中/缺失/扣分说明、一键生成改写版、报告复制与 Markdown 导出、本地历史记录、主题切换。
+系统 SHALL 通过反代页面原样承载体检器的全部能力：粘贴提示词、10 维度体检打分、命中/缺失/扣分说明、一键生成改写版、报告复制与 Markdown 导出、本地历史记录、主题切换。
 
 #### Scenario: 页面自身功能可用
 - **WHEN** 用户在 iframe 内粘贴提示词并执行体检
-- **THEN** 展示评分与逐维度分析，并可生成改写版与导出报告，全部在浏览器本地完成、不请求后端
+- **THEN** 展示评分与逐维度分析，并可生成改写版与导出报告，全部在浏览器本地完成、不请求工作台后端
+
+### Requirement: 经反向代理同源承载线上托管版
+系统 SHALL 通过 nginx `location /pc/` 反向代理线上托管版 `https://vafrcvxs.qwenwork.host/`，iframe 以同源路径 `/pc/` 加载，而非直连该外部地址。
+
+#### Scenario: 上游 CSP 阻断直连
+- **WHEN** 上游响应携带 `Content-Security-Policy: frame-ancestors` 且白名单不含工作台域名
+- **THEN** 浏览器拒绝渲染直连的 iframe；系统改为加载 `/pc/`，由 nginx 在代理层摘除 `Content-Security-Policy` 与 `X-Frame-Options` 响应头后返回，使嵌套成立
+
+#### Scenario: 反代路径可达
+- **WHEN** 浏览器请求 `https://<工作台域名>/pc/`
+- **THEN** 返回 200 与体检器页面正文，且响应中不含 `Content-Security-Policy` 与 `X-Frame-Options`

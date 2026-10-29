@@ -20,4 +20,4 @@
 ## 4. 部署与交付
 - [x] 4.1 部署 index.html / main.js 到服务器，md5 与本地一致（四项全 PASS）
 - [x] 4.2 线上验证 /pc/ 与首页可达、命中新 src、/pc/ 无 CSP 头、本地路径引用已清零
-- [ ] 4.3 openspec 变更推送 GitHub 并归档
+- [x] 4.3 openspec 变更推送 GitHub（ee6f808..4a1d818 → main）并归档为 2026-10-29-switch-prompt-checkup-to-hosted
