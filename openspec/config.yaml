@@ -1,0 +1,24 @@
+schema: spec-driven
+
+# Project context (constraints an agent cannot infer from code)
+context: |
+  项目 presales-workbench 是面向售前/解决方案专家的一体化工作台。
+  前端为 vanilla JS（index.html + src/main.js + src/styles.css），无构建步骤，
+  改完直接同步文件即生效。后端为 Node（docker 容器 presales-workbench），经 nginx 反代，
+  首页 https://49.233.179.30/ ，对外固定端口 8088。
+  数据持久化：前端 store 对象序列化进 localStorage（按账号命名空间分桶），
+  并经 schedulePush() 异步同步到服务端 SQLite（/opt/presales-workbench/data/presales.db）。
+  本项目不使用 OpenSpec 官方 slash 命令：由 WorkBuddy 作为 AI 工具驱动，
+  本地用 Node 直调 openspec-cli/bin/openspec.js 管理 openspec/，
+  文件经服务器 git 通道（deploy key + SSH -p 22，/etc/ssh/ssh_config 全局 Port 36000 需覆盖）
+  推送到 GitHub 仓库 wamgfemg/presales-workbench。
+  已知现象：前端为静态资源，整文件同步会带入与 GitHub HEAD 的格式化漂移（如 12.0px→12px），非功能差异。
+
+# Per-artifact rules
+rules:
+  proposal:
+    - 说明变更影响的页面路由（show() 分支）与 store 字段
+    - 明确是否改动后端/服务端，还是仅前端
+  tasks:
+    - 每项任务可独立验证（函数级）
+    - 前端改动需标注影响的文件(src/main.js 函数或 src/styles.css 类)与路由入口
