@@ -595,3 +595,8 @@ body.auth-pending #app{display:none!important}
 .tier-card.t3{border-left-color:#b25e00}
 .tier-card.t4{border-left-color:var(--bad)}
 .tier-card .cib-field{margin-top:2px}
+
+/* ---- 个人 · 提示词体检器（iframe 嵌入） ---- */
+.pc-frame{width:100%;height:calc(100vh - 176px);min-height:640px;display:block;
+  border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}
+@media(max-width:900px){.pc-frame{height:calc(100vh - 200px);min-height:520px}}

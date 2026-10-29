@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>提示词体检器 · 王工版 — Prompt Checkup</title>
+<meta name="description" content="粘贴一段提示词，按 10 个维度体检打分：命中什么、缺什么、为什么扣分、怎么补，并一键生成改写版。纯本地运行，不上传服务器。" />
+<style>
+:root{
+  --bg:#0e1014; --bg2:#141821; --card:#171c26; --card2:#1d2330;
+  --line:#252c3a; --tx:#e8ecf4; --tx2:#9aa6bd; --tx3:#6b7689;
+  --acc:#00d09c; --acc2:#3b82f6; --warn:#f5a524; --bad:#f2555a; --ok:#00d09c;
+  --shadow:0 10px 30px rgba(0,0,0,.35);
+  --r:14px;
+}
+html[data-theme="light"]{
+  --bg:#f5f7fb; --bg2:#eef2f8; --card:#ffffff; --card2:#f7f9fd;
+  --line:#e3e8f0; --tx:#141922; --tx2:#5a6577; --tx3:#8b95a6;
+  --acc:#00a97e; --acc2:#2563eb; --shadow:0 8px 24px rgba(20,25,34,.08);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:
+    radial-gradient(1100px 480px at 50% -8%, color-mix(in srgb,var(--acc) 9%,transparent), transparent 62%),
+    var(--bg);
+  color:var(--tx);
+  font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+  font-size:14px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  transition:background .25s,color .25s;
+}
+a{color:var(--acc2)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px 80px}
+
+/* header */
+header{
+  position:sticky;top:0;z-index:20;
+  background:color-mix(in srgb,var(--bg) 88%,transparent);
+  backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line);
+}
+header::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;
+  background:linear-gradient(90deg,transparent,var(--acc),var(--acc2),transparent);opacity:.55}
+.hd{max-width:1180px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:12px}
+.logo{
+  width:34px;height:34px;border-radius:10px;flex:none;
+  background:linear-gradient(135deg,var(--acc),var(--acc2));
+  display:grid;place-items:center;font-size:17px;
+}
+.hd h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px}
+.hd .sub{font-size:12px;color:var(--tx3);margin:0}
+.hd .grow{flex:1}
+.iconbtn{
+  border:1px solid var(--line);background:var(--card);color:var(--tx2);
+  border-radius:10px;padding:7px 12px;font-size:12.5px;cursor:pointer;
+  transition:.18s; font-family:inherit;
+}
+.iconbtn:hover{border-color:var(--acc);color:var(--acc)}
+
+/* hero */
+.hero{padding:40px 0 22px;text-align:center}
+.hero h2{font-size:32px;margin:0 0 12px;letter-spacing:-.5px;line-height:1.3}
+.hero h2 em{font-style:normal;color:var(--acc)}
+.hero p{margin:0 auto;max-width:680px;color:var(--tx2);font-size:14.5px}
+.hero .badge{display:inline-block;margin:0 auto 16px;font-size:12px;color:var(--tx2);
+  border:1px solid var(--line);border-radius:99px;padding:5px 14px;
+  background:color-mix(in srgb,var(--acc) 8%,var(--card));box-shadow:var(--shadow)}
+.hero .badge b{color:var(--acc)}
+
+/* layout: top 3-equal grid, then full-width evidence & history */
+.layout{display:flex;flex-direction:column;gap:18px;margin-top:26px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);overflow:hidden;transition:border-color .2s,box-shadow .2s,transform .2s;
+}
+.card:hover{border-color:color-mix(in srgb,var(--acc) 38%,var(--line));box-shadow:0 14px 36px rgba(0,0,0,.42)}
+.card .ch{
+  display:flex;align-items:center;gap:8px;padding:13px 16px;
+  border-bottom:1px solid var(--line);background:var(--card2);position:relative;
+}
+.card .ch::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(var(--acc),var(--acc2));border-radius:0 3px 3px 0;opacity:.85}
+.card .ch b{font-size:13.5px}
+.card .ch .tag{
+  font-size:11px;color:var(--tx3);border:1px solid var(--line);
+  border-radius:6px;padding:1px 7px;margin-left:auto;
+}
+.card .cb{padding:16px}
+
+textarea{
+  width:100%;min-height:230px;resize:vertical;
+  background:var(--bg2);color:var(--tx);
+  border:1px solid var(--line);border-radius:11px;
+  padding:13px 14px;font-size:13.5px;line-height:1.7;
+  font-family:ui-monospace,"Cascadia Code",Consolas,"Microsoft YaHei",monospace;
+  outline:none;transition:.18s;
+}
+textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px color-mix(in srgb,var(--acc) 15%,transparent)}
+.row{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:11px}
+.btn{
+  border:none;border-radius:10px;padding:10px 18px;font-size:13.5px;font-weight:600;
+  cursor:pointer;font-family:inherit;transition:.18s;
+  background:linear-gradient(135deg,var(--acc),#00b2d8);color:#06231c;
+}
+.btn:hover{transform:translateY(-1px);filter:brightness(1.07)}
+.btn:active{transform:none}
+.btn.ghost{background:var(--bg2);color:var(--tx2);border:1px solid var(--line);font-weight:500}
+.btn.ghost:hover{border-color:var(--acc);color:var(--acc)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.cnt{font-size:12px;color:var(--tx3);margin-left:auto}
+.kbd{font-size:11px;color:var(--tx3);border:1px solid var(--line);border-radius:6px;
+  padding:2px 7px;background:var(--bg2);font-family:ui-monospace,Consolas,monospace}
+
+/* report */
+.score{display:flex;align-items:center;gap:20px;padding:6px 4px 16px}
+.ring{position:relative;width:104px;height:104px;flex:none;filter:drop-shadow(0 6px 16px rgba(0,0,0,.28))}
+.ring svg{transform:rotate(-90deg)}
+.ring .num{
+  position:absolute;inset:0;display:grid;place-items:center;
+  font-size:30px;font-weight:800;letter-spacing:-1px;
+}
+.ring .num small{font-size:12px;font-weight:600;color:var(--tx3);display:block;margin-top:-4px}
+.verdict b{font-size:18px;display:block;margin-bottom:3px}
+.verdict p{margin:0;color:var(--tx2);font-size:13px;max-width:420px}
+.bars{display:flex;flex-direction:column;gap:3px}
+.bar{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;cursor:pointer;transition:background .15s,transform .15s}
+.bar:hover{background:var(--bg2);transform:translateX(2px)}
+.bar .nm{width:92px;flex:none;font-size:12.5px;color:var(--tx2)}
+.bar .tr{flex:1;height:7px;border-radius:99px;background:var(--bg2);overflow:hidden}
+.bar .fl{height:100%;border-radius:99px;transition:width .5s cubic-bezier(.2,.8,.2,1)}
+.bar .vl{width:44px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;color:var(--tx3)}
+.bar .ic{width:16px;text-align:center;font-size:12px}
+
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--tx3)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:9px;height:9px;border-radius:99px;display:inline-block}
+
+.dims{margin-top:6px;border-top:1px solid var(--line)}
+.dim{border-bottom:1px solid var(--line)}
+.dim:last-child{border-bottom:none}
+.dim .dh{
+  display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;user-select:none;
+}
+.dim .dh:hover{background:var(--card2)}
+.dot{width:8px;height:8px;border-radius:99px;flex:none}
+.dim .dh b{font-size:13.5px;font-weight:600}
+.dim .dh .w{font-size:11px;color:var(--tx3)}
+.dim .dh .st{
+  margin-left:auto;font-size:11.5px;padding:2px 8px;border-radius:6px;
+  border:1px solid var(--line);color:var(--tx3);
+}
+.dim .db{display:none;padding:0 16px 14px 34px}
+.dim.open .db{display:block}
+.dim .db p{margin:0 0 8px;font-size:13px;color:var(--tx2)}
+.ev{
+  background:var(--bg2);border:1px solid var(--line);border-radius:9px;
+  padding:10px 12px;font-size:12.5px;color:var(--tx2);
+  font-family:ui-monospace,Consolas,monospace;line-height:1.75;
+  max-height:150px;overflow:auto;word-break:break-word;white-space:pre-wrap;
+}
+.ev mark{background:color-mix(in srgb,var(--acc) 26%,transparent);color:var(--tx);border-radius:3px;padding:0 2px}
+.fix{
+  margin-top:9px;border-left:3px solid var(--acc2);padding:7px 0 7px 11px;
+  font-size:12.5px;color:var(--tx2);
+}
+.fix b{color:var(--tx);font-weight:600}
+
+/* rewrite */
+.rw{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.8;
+  background:var(--bg2);border:1px solid var(--line);border-radius:11px;padding:14px;
+  font-family:ui-monospace,Consolas,"Microsoft YaHei",monospace;max-height:420px;overflow:auto;margin:0}
+.empty{color:var(--tx3);text-align:center;padding:34px 14px;font-size:13px;border:1px dashed var(--line);border-radius:12px;margin:6px}
+.empty .e{font-size:30px;display:block;margin-bottom:8px;opacity:.7}
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.chip{
+  font-size:12px;border:1px solid var(--line);background:var(--bg2);color:var(--tx2);
+  border-radius:99px;padding:5px 11px;cursor:pointer;transition:.15s;font-family:inherit;
+}
+.chip:hover{border-color:var(--acc);color:var(--acc)}
+.miss{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.miss span{
+  font-size:12px;border-radius:7px;padding:4px 10px;
+  background:color-mix(in srgb,var(--bad) 14%,transparent);
+  color:var(--bad);border:1px solid color-mix(in srgb,var(--bad) 32%,transparent);
+}
+.toast{
+  position:fixed;left:50%;bottom:34px;transform:translate(-50%,20px);
+  background:var(--tx);color:var(--bg);padding:9px 18px;border-radius:99px;
+  font-size:13px;font-weight:600;opacity:0;pointer-events:none;transition:.25s;z-index:99;
+}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+footer{text-align:center;color:var(--tx3);font-size:12px;padding:30px 0 0}
+.tips{margin-top:16px;font-size:12px;color:var(--tx3);line-height:1.8}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:6px}
+.score,.bars,.dims{animation:pcin .42s cubic-bezier(.2,.8,.2,1) both}
+@keyframes pcin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* history (full width section) */
+.hist h3{font-size:13px;margin:0 0 10px;color:var(--tx2)}
+#histList{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+@media(max-width:640px){#histList{grid-template-columns:1fr}}
+.hist .item{
+  border:1px solid var(--line);border-radius:10px;padding:9px 11px;
+  cursor:pointer;transition:border-color .15s,transform .15s,box-shadow .15s;background:var(--card2);
+}
+.hist .item:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 8px 18px rgba(0,0,0,.3)}
+.hist .item .t{font-size:12.5px;color:var(--tx);font-weight:600}
+.hist .item .m{font-size:11px;color:var(--tx3);margin-top:3px;display:flex;gap:8px;align-items:center}
+.hist .item .sc{color:var(--acc);font-weight:700}
+.hist .empty{grid-column:1/-1;color:var(--tx3);font-size:12px;padding:6px 2px}
+.hist .clear{font-size:11px;color:var(--tx3);cursor:pointer;border:1px solid var(--line);
+  border-radius:8px;padding:4px 9px;display:inline-block;margin-bottom:10px}
+.hist .clear:hover{color:var(--bad);border-color:var(--bad)}
+</style>
+</head>
+<body>
+<header>
+  <div class="hd">
+    <div class="logo">🩺</div>
+    <div>
+      <h1>提示词体检器 · 王工版</h1>
+      <p class="sub">Prompt Checkup · 10 维诊断 · 一键改写</p>
+    </div>
+    <div class="grow"></div>
+    <button class="iconbtn" id="theme">🌗 主题</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero">
+    <h2>你的提示词，差在哪一步？</h2>
+    <p>粘贴一段提示词，按 10 个维度体检打分：命中什么、缺什么、为什么扣分、怎么补。最后一键生成改写版，直接复制去用。全部在浏览器本地完成，提示词<strong>不会上传任何服务器</strong>。</p>
+    <div class="badge">🔒 <b>纯本地运行</b> · 隐私安全 · 提示词不上传服务器</div>
+  </div>
+
+  <div class="layout">
+    <div class="grid">
+      <!-- 输入 -->
+      <div class="card">
+        <div class="ch"><b>① 粘贴提示词</b><span class="tag" id="modeTag">纯本地运行</span></div>
+        <div class="cb">
+          <textarea id="src" placeholder="把你的提示词贴进来……&#10;&#10;例：你是一名资深汽车销售顾问，帮我写一段抖音口播文案，介绍冬季玻璃水更换，控制在 200 字以内，口语化，不要出现价格。"></textarea>
+          <div class="row">
+            <button class="btn" id="go">开始体检</button>
+            <span class="kbd">⌘/Ctrl + ↵</span>
+            <button class="btn ghost" id="clr">清空</button>
+            <span class="cnt" id="cnt">0 字</span>
+          </div>
+          <div class="chips" id="samples"></div>
+          <div class="tips">
+            全部计算在浏览器本地完成，提示词不会上传到任何服务器。<br>
+            支持中英文混合检测；支持 <code>{{变量}}</code>、<code>&lt;占位符&gt;</code> 等模板写法识别。
+          </div>
+        </div>
+      </div>
+
+      <!-- 报告 -->
+      <div class="card">
+        <div class="ch"><b>② 体检报告</b><span class="tag" id="rk">待体检</span></div>
+        <div class="cb">
+          <div id="rpt">
+            <div class="empty"><span class="e">🩺</span>左侧粘贴提示词后点「开始体检」<br>这里会给出总分、10 维明细与改写版</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 改写（已与历史记录对调，提到顶部第三列） -->
+      <div class="card" id="rwCard">
+        <div class="ch"><b>④ 改写版提示词</b><span class="tag" id="rwTag">按缺失维度补齐</span></div>
+        <div class="cb">
+          <div class="empty" id="rwEmpty"><span class="e">✍️</span>体检后这里生成改写版<br>按缺失维度自动补齐结构</div>
+          <pre class="rw" id="rwBox" style="display:none"></pre>
+          <div class="row" id="rwBtns" style="margin-top:12px;display:none">
+            <button class="btn" id="cp">复制改写版</button>
+            <button class="btn ghost" id="cpRpt">复制体检报告</button>
+            <button class="btn ghost" id="dlRpt">导出报告(.md)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 原文证据（整行通栏，宽度 = 上方三张卡总和） -->
+    <div class="card" id="evCard" style="display:none">
+      <div class="ch"><b>③ 原文证据标注</b><span class="tag">命中关键词高亮</span></div>
+      <div class="cb"><div class="ev" id="evBox"></div></div>
+    </div>
+
+    <!-- 历史记录（已与改写版对调，移到底部整行） -->
+    <div class="card hist">
+      <div class="ch"><b>⑤ 历史记录</b><span class="tag">本地保存</span></div>
+      <div class="cb">
+        <span class="clear" id="histClear">清空历史</span>
+        <div id="histList"><div class="empty">还没有体检记录。做完一次体检会自动留痕。</div></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>提示词体检器 · 王工版 · 用 WorkBuddy 制作 · 纯本地运行不上传</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ 维度定义（10 维引擎，本工具核心） ============ */
+var DIMS = [
+  {
+    key:'role', name:'角色设定', w:10,
+    desc:'是否指定了 AI 该扮演的身份、专业视角或经验水平。没有角色，输出往往泛泛而谈。',
+    cn:['你是','你是一名','你是一个','作为','扮演','充当','身份','假设你是','请你作为'],
+    en:['you are','act as','as a','role:','role play'],
+    strong:['你是','你是一名','你是一个','扮演','假设你是','you are','act as'],
+    fix:'开头补一句角色：<b>「你是【领域】的【资深身份】，擅长【具体能力】。」</b>角色越具体，语气和专业深度越可控。'
+  },
+  {
+    key:'goal', name:'任务目标', w:16,
+    desc:'是否用明确的动作动词说了清「要做什么」。这是权重最高的一项。',
+    cn:['帮我','请','生成','写','撰写','分析','总结','归纳','翻译','改写','润色','列出','对比','评估','优化','设计','解释','提取','分类','检查','诊断','推荐','输出','给出','回答','计算','整理'],
+    en:['write','generate','analyze','summarize','translate','rewrite','list','compare','evaluate','optimize','design','explain','extract','classify','create','output'],
+    strong:['生成','写','撰写','分析','总结','翻译','改写','列出','对比','设计','提取','诊断','write','generate','analyze','summarize','translate','create'],
+    fix:'用一句话说清动作 + 对象：<b>「【动作动词】一份/一段【交付物】，用于【用途】。」</b>避免「帮我看看这个」这类无动词表述。'
+  },
+  {
+    key:'ctx', name:'背景上下文', w:10,
+    desc:'是否交代了场景、受众、业务背景。模型不知道你的处境，只能猜。',
+    cn:['背景','场景','受众','读者','面向','目标人群','用户是','客户是','用于','目的是','我们公司','我们店','行业','目前','现状'],
+    en:['context','background','audience','target','scenario'],
+    strong:['背景','受众','读者','面向','目标人群','context','audience','background'],
+    fix:'补一句背景：<b>「背景：［谁在什么场景下用，他们已知道什么、关心什么］。」</b>受众越清晰，取舍越准。'
+  },
+  {
+    key:'input', name:'输入材料', w:10,
+    desc:'是否明确了输入是什么：原文、数据，还是变量占位符。',
+    cn:['以下是','下面是','输入','材料','内容如下','文本如下','原文','待处理','资料','数据如下','附件','引用','{{','}}'],
+    en:['here is','here\'s','input','below','the text','following','{{'],
+    strong:['以下是','下面是','内容如下','文本如下','数据如下','"""','{{','here is','here\'s'],
+    fix:'用分隔符把材料框起来：<b>「以下是待处理内容：\n"""\n［材料］\n"""」</b>，或声明占位符 <b>{{变量名}}</b>。'
+  },
+  {
+    key:'format', name:'输出格式', w:15,
+    desc:'是否规定了结构、格式、字数、语言。不写格式，返回的就是模型默认的那一套。',
+    cn:['格式','输出为','json','markdown','表格','列表','分点','分条','要点','段落','字数','不多于','不超过','控制在','以内','结构','标题','小标题','第一','第二','1.','2.','中文','英文'],
+    en:['format','json','markdown','table','bullet','list','no more than','within','structure','headings','in chinese','in english'],
+    strong:['格式','输出为','json','markdown','表格','字数','不多于','不超过','控制在','format','table','markdown'],
+    fix:'明确交付形态：<b>「以【Markdown/表格/JSON】输出，【结构要求】，【字数限制】。」</b>字数是最好用的成本控制手段。'
+  },
+  {
+    key:'limit', name:'约束边界', w:10,
+    desc:'是否说了「不要什么」：禁区、风格红线、范围限制。',
+    cn:['不要','不能','不得','禁止','避免','仅限','只','必须','只能','不许','不用','无需','除了','不提','别说','避开','不得出现'],
+    en:['don\'t','do not','avoid','must not','never','only','without'],
+    strong:['不要','不能','不得','禁止','避免','不许','不用','don\'t','do not','avoid','never','must not'],
+    fix:'列出红线：<b>「约束：不要【具体行为】，避免【风格】，仅限【范围】。」</b>写清反面比堆正面形容词有效得多。'
+  },
+  {
+    key:'example', name:'示例范例', w:9,
+    desc:'是否给了输入输出示例（few-shot）。复杂任务给一个样例，效果提升最明显。',
+    cn:['例如','示例','比如','样例','示范','参考如下','像这样','示范如下','举个例子','input:','output:'],
+    en:['example','e.g.','for example','such as','input:','output:','sample'],
+    strong:['例如','示例','比如','样例','示范','举个例子','example','e.g.','sample'],
+    fix:'贴一组最小样例：<b>「示例输入：… → 期望输出：…」</b>一个好样例胜过十句描述。'
+  },
+  {
+    key:'accept', name:'验收标准', w:10,
+    desc:'是否定义了「做到什么算完成」的可验证条件。',
+    cn:['确保','标准是','要求是','必须包含','应当包含','需要包含','判断标准','验收','检查','核对','达到','符合','满足','每条都','逐条'],
+    en:['must include','ensure','make sure','criteria','should contain','verify','check that'],
+    strong:['验收','确保','必须包含','应当包含','需要包含','判断标准','标准是','must include','ensure','criteria'],
+    fix:'写可勾选的验收项：<b>「验收：①…②…③…；不满足则重写。」</b>可验证 = 可复现。'
+  },
+  {
+    key:'clear', name:'表述清晰度', w:5,
+    desc:'是否存在「尽量」「适当」「高质量」这类无法执行的模糊词。',
+    fuzzy:1,
+    cn:['尽量','适当','一些','大概','差不多','相关的','有关的','若干','某些','等等','高质量','专业一点','好一点','优秀','完美','尽可能','视情况','可能','也许','差不多','等等'],
+    en:['maybe','some','appropriate','as needed','if possible','etc.','high-quality','nice','good'],
+    fix:'把模糊词换成可判定的说法：<b>「适当」→「3—5 条」；「高质量」→「每条含一个具体数字」；「尽快」→「24 小时内」。</b>'
+  },
+  {
+    key:'lean', name:'精简无冗余', w:5,
+    desc:'是否有客套话、重复表述、与任务无关的内容。冗余会稀释重点。',
+    lean:1,
+    cn:['谢谢','感谢','麻烦你','麻烦了','请你好好','希望你能','非常感谢','拜托','辛苦了','如果能','那就更好了'],
+    en:['thank you','thanks','please kindly','i would appreciate','if you could'],
+    fix:'删掉客套与重复。礼貌用语不提升输出质量，只会占掉注意力预算。'
+  }
+];
+
+/* ============ 工具 ============ */
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function reEsc(s){return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+function has(t,arr){
+  var out=[];
+  for(var i=0;i<arr.length;i++){
+    var p=arr[i];
+    if(!p) continue;
+    try{
+      var m=t.match(new RegExp(reEsc(p),'gi'));
+      if(m) out=out.concat(m);
+    }catch(e){}
+  }
+  return out;
+}
+function len(t){return (t.match(/[一-龥]|[A-Za-z0-9]+/g)||[]).length;}
+
+/* ============ 检测引擎 ============ */
+function analyze(text){
+  var t=text||'', res=[], total=0, evAll=[];
+  var L=len(t);
+
+  for(var i=0;i<DIMS.length;i++){
+    var d=DIMS[i], hits=[], score=0, status='miss', note='';
+
+    if(d.fuzzy){
+      hits=has(t,d.cn.concat(d.en||[]));
+      var rate=Math.min(1,hits.length/(Math.max(1,L/60)));
+      score=Number((1-rate).toFixed(2));
+      if(hits.length===0) status='ok';
+      else if(hits.length<=1) status='weak';
+      else status='miss';
+      note=hits.length? ('检出 '+hits.length+' 处模糊表述：'+hits.slice(0,8).join('、')) : '未检出模糊词，表述可判定。';
+    }else if(d.lean){
+      hits=has(t,d.cn.concat(d.en||[]));
+      var r2=Math.min(1,hits.length/2);
+      score=Number((1-r2).toFixed(2));
+      if(hits.length===0) status='ok';
+      else if(hits.length<=1) status='weak';
+      else status='miss';
+      note=hits.length? ('检出 '+hits.length+' 处客套/冗余：'+hits.slice(0,8).join('、')) : '无客套冗余，信息密度正常。';
+    }else{
+      hits=has(t,d.cn.concat(d.en||[]));
+      var uniq=[];
+      hits.forEach(function(h){ if(uniq.indexOf(h.toLowerCase())<0) uniq.push(h.toLowerCase()); });
+      var sh=d.strong?has(t,d.strong):[];
+      if(L<8){ score=0; status='miss'; note='提示词过短，无法判断。'; }
+      else if(sh.length){ score=1; status='ok'; }
+      else if(uniq.length>=2){ score=.8; status='weak'; }
+      else if(uniq.length===1){ score=.55; status='weak'; }
+      else { score=0; status='miss'; }
+      if(uniq.length) note='命中信号：'+uniq.slice(0,8).join('、');
+      else note=d.desc;
+      hits=uniq;
+    }
+
+    if(L<15&&!d.fuzzy&&!d.lean){ note='提示词过短，几乎未交代任何约束条件。'; }
+
+    total+=d.w*score;
+    if(hits&&hits.length) evAll=evAll.concat(hits);
+    res.push({key:d.key,name:d.name,w:d.w,score:score,status:status,
+      got:Math.round(d.w*score),note:note,hits:hits||[],
+      desc:d.desc,fix:d.fix});
+  }
+  return {dims:res,total:Math.round(total),ev:evAll,len:L};
+}
+
+/* ============ 评级 ============ */
+function rank(s){
+  if(s>=88) return {k:'S',t:'优秀 · 可直接投产',c:'var(--ok)',
+    p:'结构完整、约束明确。建议在真实场景跑一遍，看输出是否稳定复现。'};
+  if(s>=72) return {k:'A',t:'良好 · 小补即可',c:'var(--acc)',
+    p:'主干齐了，缺的是少数细节。优先补评分最低的两项。'};
+  if(s>=56) return {k:'B',t:'及格 · 需补关键项',c:'var(--warn)',
+    p:'能用，但输出会漂移。按下方缺失项补齐后再用。'};
+  if(s>=36) return {k:'C',t:'待优化 · 建议重写',c:'var(--warn)',
+    p:'缺的维度太多，模型只能靠猜。用右侧改写版做底稿。'};
+  return {k:'D',t:'需重写 · 信息严重不足',c:'var(--bad)',
+    p:'现有内容不足以约束输出。直接用改写版模板重填。'};
+}
+
+/* ============ 改写生成 ============ */
+function rewrite(text,r){
+  var t=(text||'').trim();
+  var miss=r.dims.filter(function(d){return d.status!=='ok';});
+  var L=[
+    '# 角色',
+    '你是【领域】的【资深身份】，擅长【具体能力】。',
+    '',
+    '# 任务',
+    t? ('【动作动词】'+ (t.length>90? '（原始需求见下方「原始需求」）':'：'+t.replace(/\n+/g,' '))) : '【动作动词】一份【交付物】，用于【用途】。',
+    '',
+    '# 背景',
+    '受众是【谁】，他们已知道【…】，真正关心【…】，使用场景是【…】。',
+    '',
+    '# 输入',
+    '以下是待处理内容：',
+    '"""',
+    '【在此粘贴材料，或声明 {{变量名}}】',
+    '"""',
+    '',
+    '# 输出格式',
+    '以【Markdown 表格 / 分点列表 / JSON】输出，【结构要求】，【字数或条数限制】，使用【中文】。',
+    '',
+    '# 约束',
+    '- 不要【具体禁区】',
+    '- 避免【不想要的风格】',
+    '- 仅限【范围】，超出范围的部分直接说明「不适用」',
+    '',
+    '# 示例（可选但强烈建议）',
+    '输入：… → 期望输出：…',
+    '',
+    '# 验收标准',
+    '① 【可勾选条件 1】',
+    '② 【可勾选条件 2】',
+    '③ 不满足以上任一条件则重写，不要输出半成品。'
+  ];
+  if(t&&t.length>90) L=L.concat(['','# 原始需求（保留原文，勿删）',t]);
+
+  var head='以下为按体检结果补齐的改写稿，方括号【】内需你替换成真实内容：\n\n';
+  var warn='\n\n————\n本次体检缺失维度：'+(miss.map(function(d){return d.name;}).join('、')||'无')+
+    '\n总分 '+r.total+' / 100（'+rank(r.total).t+'）\n说明：改写稿是结构化底稿，请替换【】占位后再使用。';
+  return head+L.join('\n')+warn;
+}
+
+/* ============ 渲染 ============ */
+function ring(s,c){
+  var R=44,C=2*Math.PI*R,off=C*(1-s/100);
+  return '<div class="ring"><svg width="104" height="104">'+
+    '<circle cx="52" cy="52" r="'+R+'" fill="none" stroke="var(--line)" stroke-width="9"/>'+
+    '<circle cx="52" cy="52" r="'+R+'" fill="none" stroke="'+c+'" stroke-width="9" stroke-linecap="round" '+
+    'stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'"/></svg>'+
+    '<div class="num" style="color:'+c+'">'+s+'<small>/100</small></div></div>';
+}
+function render(text){
+  var r=analyze(text), rk=rank(r.total);
+  var miss=r.dims.filter(function(d){return d.status==='miss';});
+
+  var h='<div class="score">'+ring(r.total,rk.c)+
+    '<div class="verdict"><b style="color:'+rk.c+'">'+rk.k+' 级 · '+rk.t+'</b><p>'+rk.p+'</p></div></div>';
+
+    h+='<div class="bars">';
+  r.dims.forEach(function(d){
+    var c=d.status==='ok'?'var(--ok)':(d.status==='weak'?'var(--warn)':'var(--bad)');
+    var ic=d.status==='ok'?'✔':(d.status==='weak'?'!':'✕');
+    h+='<div class="bar" title="'+esc(d.name)+' · 权重 '+d.w+' · '+esc(d.desc)+'"><span class="ic" style="color:'+c+'">'+ic+'</span>'+
+       '<span class="nm">'+d.name+'</span>'+
+       '<span class="tr"><span class="fl" style="width:'+Math.round(d.score*100)+'%;background:'+c+'"></span></span>'+
+       '<span class="vl">'+d.got+'/'+d.w+'</span></div>';
+  });
+  h+='</div>';
+
+  h+='<div class="legend">'+
+     '<span><i style="background:var(--ok)"></i>已具备</span>'+
+     '<span><i style="background:var(--warn)"></i>薄弱</span>'+
+     '<span><i style="background:var(--bad)"></i>缺失</span></div>';
+
+  if(miss.length){
+    h+='<div class="miss">'+miss.map(function(d){return '<span>缺 · '+d.name+'</span>';}).join('')+'</div>';
+  }
+
+  h+='<div class="dims">';
+  r.dims.forEach(function(d,i){
+    var c=d.status==='ok'?'var(--ok)':(d.status==='weak'?'var(--warn)':'var(--bad)');
+    var st=d.status==='ok'?'已具备':(d.status==='weak'?'薄弱':'缺失');
+    var evs=d.hits.length?'<div class="ev">'+hi(text,d.hits)+'</div>':'';
+    h+='<div class="dim" data-i="'+i+'"><div class="dh">'+
+       '<span class="dot" style="background:'+c+'"></span><b>'+d.name+'</b>'+
+       '<span class="w">权重 '+d.w+'</span>'+
+       '<span class="st" style="color:'+c+';border-color:'+c+'55">'+st+'</span></div>'+
+       '<div class="db"><p>'+esc(d.note)+'</p>'+evs+
+       (d.status!=='ok'?'<div class="fix"><b>怎么补：</b>'+d.fix+'</div>':'')+
+       '</div></div>';
+  });
+  h+='</div>';
+
+  document.getElementById('rpt').innerHTML=h;
+  document.getElementById('rk').textContent=r.total+' 分 · '+rk.k+' 级';
+
+  var evBox=document.getElementById('evBox');
+  if(r.ev.length){ evBox.innerHTML=hi(text,r.ev); document.getElementById('evCard').style.display=''; }
+  else { document.getElementById('evCard').style.display='none'; }
+
+  document.getElementById('rwBox').textContent=rewrite(text,r);
+  document.getElementById('rwBox').style.display='';
+  document.getElementById('rwBtns').style.display='';
+  document.getElementById('rwEmpty').style.display='none';
+  document.getElementById('rwTag').textContent='补齐 '+(miss.length||0)+' 个缺失维度';
+
+  [].forEach.call(document.querySelectorAll('.dim .dh'),function(el){
+    el.onclick=function(){el.parentNode.classList.toggle('open');};
+  });
+  return r;
+}
+function hi(text,terms){
+  var t=esc(text);
+  var us=[];
+  (terms||[]).forEach(function(x){var s=esc(String(x));if(s&&us.indexOf(s)<0&&s.length<30)us.push(s);});
+  us.sort(function(a,b){return b.length-a.length;});
+  us.forEach(function(s){
+    var re=new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+    t=t.replace(re,function(m){return '<mark>'+m+'</mark>';});
+  });
+  return t;
+}
+
+/* ============ 报告 Markdown 生成 ============ */
+function reportMD(text){
+  var r=analyze(text),rk=rank(r.total);
+  var md='# 提示词体检报告\n\n总分：**'+r.total+' / 100**（'+rk.k+' 级 · '+rk.t+'）\n\n| 维度 | 权重 | 得分 | 状态 |\n|---|---|---|---|\n';
+  r.dims.forEach(function(d){
+    md+='| '+d.name+' | '+d.w+' | '+d.got+' | '+(d.status==='ok'?'已具备':(d.status==='weak'?'薄弱':'缺失'))+' |\n';
+  });
+  md+='\n## 待改进项\n\n';
+  var bad=r.dims.filter(function(d){return d.status!=='ok';});
+  if(!bad.length) md+='无，全部维度已覆盖。\n';
+  bad.forEach(function(d){
+    md+='- **'+d.name+'**：'+d.note+'\n  - 怎么补：'+d.fix.replace(/<[^>]+>/g,'')+'\n';
+  });
+  md+='\n## 改写版提示词\n\n```\n'+rewrite(text,r)+'\n```\n';
+  return md;
+}
+
+/* ============ 历史记录（本地） ============ */
+var HKEY='pc-history-wf';
+function loadHist(){
+  try{return JSON.parse(localStorage.getItem(HKEY)||'[]');}catch(e){return [];}
+}
+function saveHist(arr){
+  try{localStorage.setItem(HKEY,JSON.stringify(arr.slice(0,8)));}catch(e){}
+}
+function renderHist(){
+  var arr=loadHist(), box=document.getElementById('histList');
+  if(!arr.length){box.innerHTML='<div class="empty">还没有体检记录。做完一次体检会自动留痕。</div>';return;}
+  box.innerHTML=arr.map(function(it,i){
+    var d=new Date(it.ts);
+    var hh=('0'+d.getHours()).slice(-2), mm=('0'+d.getMinutes()).slice(-2);
+    return '<div class="item" data-i="'+i+'"><div class="t">'+esc(it.text||'(空)')+'</div>'+
+      '<div class="m"><span class="sc">'+it.score+'分</span><span>'+it.grade+'级</span><span>'+hh+':'+mm+'</span></div></div>';
+  }).join('');
+  [].forEach.call(box.querySelectorAll('.item'),function(el){
+    el.onclick=function(){
+      var it=loadHist()[+el.getAttribute('data-i')];
+      if(it&&it.full){document.getElementById('src').value=it.full;upd();toast('已载入历史记录');}
+      else toast('该记录仅保留摘要，请重新粘贴原文');
+    };
+  });
+}
+
+/* ============ 交互 ============ */
+var SAMPLES=[
+  {n:'弱提示词（典型反例）',v:'帮我写个文案，关于汽车保养的，写得专业一点，谢谢。'},
+  {n:'中等提示词',v:'你是一名汽车销售顾问，帮我写一段抖音口播文案，介绍冬季玻璃水更换的重要性，控制在200字以内，口语化，不要出现价格信息。'},
+  {n:'完整提示词（正面样例）',v:'你是广汽丰田4S店有8年经验的售后顾问，擅长用大白话讲清养车知识。\n\n任务：写一段抖音口播文案，讲解「为什么冬天要换防冻玻璃水」。\n\n背景：受众是江浙一带的私家车主，他们以为玻璃水随便加就行，真正关心的是「不换会不会出问题」。\n\n输出格式：分3段（痛点钩子/原理解释/行动建议），总字数180-220字，口语化短句，每段不超过3行。\n\n约束：不要出现具体价格、不要承诺质保、不要用「绝对」「一定」等绝对化表述、不要提竞品品牌。\n\n验收：①开头10字内必须有痛点钩子 ②必须解释清楚结冰导致的后果 ③结尾只有一个行动号召。'}
+];
+(function(){
+  var box=document.getElementById('samples');
+  SAMPLES.forEach(function(s){
+    var b=document.createElement('button');
+    b.className='chip'; b.textContent=s.n;
+    b.onclick=function(){document.getElementById('src').value=s.v;upd();toast('已载入示例，点「开始体检」');};
+    box.appendChild(b);
+  });
+})();
+function upd(){
+  var t=document.getElementById('src').value;
+  document.getElementById('cnt').textContent=len(t)+' 字';
+}
+document.getElementById('src').addEventListener('input',upd);
+document.getElementById('src').addEventListener('keydown',function(e){
+  if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){document.getElementById('go').click();}
+});
+document.getElementById('go').onclick=function(){
+  var t=document.getElementById('src').value.trim();
+  if(t.length<4){toast('先粘贴一段提示词');return;}
+  var r=render(t);
+  var rk=rank(r.total);
+  // 保留全文到本地历史（仅本机可见）
+  var arr=loadHist();
+  arr.unshift({text:t.slice(0,60),full:t,score:r.total,grade:rk.k,ts:Date.now()});
+  saveHist(arr); renderHist();
+  document.getElementById('rpt').scrollIntoView({behavior:'smooth',block:'nearest'});
+};
+document.getElementById('clr').onclick=function(){
+  document.getElementById('src').value='';upd();
+  document.getElementById('rpt').innerHTML='<div class="empty"><span class="e">🩺</span>左侧粘贴提示词后点「开始体检」<br>这里会给出总分、10 维明细与改写版</div>';
+  document.getElementById('rk').textContent='待体检';
+  document.getElementById('evCard').style.display='none';
+  document.getElementById('rwBox').style.display='none';
+  document.getElementById('rwBtns').style.display='none';
+  document.getElementById('rwEmpty').style.display='';
+};
+document.getElementById('histClear').onclick=function(){
+  try{localStorage.removeItem(HKEY);}catch(e){}
+  renderHist(); toast('历史已清空');
+};
+function toast(m){
+  var el=document.getElementById('toast');el.textContent=m;el.classList.add('on');
+  clearTimeout(el._t);el._t=setTimeout(function(){el.classList.remove('on');},1800);
+}
+function cp(txt){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){toast('已复制到剪贴板');},function(){fb(txt);});
+  } else fb(txt);
+}
+function fb(txt){
+  var a=document.createElement('textarea');a.value=txt;a.style.position='fixed';a.style.opacity=0;
+  document.body.appendChild(a);a.select();
+  try{document.execCommand('copy');toast('已复制到剪贴板');}catch(e){toast('复制失败，请手动选中');}
+  document.body.removeChild(a);
+}
+document.getElementById('cp').onclick=function(){
+  cp(document.getElementById('rwBox').textContent);
+};
+document.getElementById('cpRpt').onclick=function(){
+  var t=document.getElementById('src').value.trim();
+  if(!t){toast('先做一次体检');return;}
+  cp(reportMD(t));
+};
+document.getElementById('dlRpt').onclick=function(){
+  var t=document.getElementById('src').value.trim();
+  if(!t){toast('先做一次体检');return;}
+  var md=reportMD(t);
+  var blob=new Blob([md],{type:'text/markdown;charset=utf-8'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url; a.download='提示词体检报告.md';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('报告已导出');
+};
+var theme=document.getElementById('theme');
+theme.onclick=function(){
+  var cur=document.documentElement.getAttribute('data-theme');
+  var nxt=cur==='light'?'dark':'light';
+  document.documentElement.setAttribute('data-theme',nxt);
+  try{localStorage.setItem('pc-theme',nxt);}catch(e){}
+};
+(function(){
+  try{
+    var q=new URLSearchParams(location.search).get('theme');
+    var s=q||localStorage.getItem('pc-theme');
+    if(s) document.documentElement.setAttribute('data-theme',s);
+    else if(window.matchMedia&&window.matchMedia('(prefers-color-scheme:light)').matches)
+      document.documentElement.setAttribute('data-theme','light');
+  }catch(e){}
+})();
+upd(); renderHist();
+</script>
+</body>
+</html>
